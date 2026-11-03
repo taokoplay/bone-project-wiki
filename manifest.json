@@ -3,10 +3,30 @@
   "id": "bone.project-wiki",
   "name": "BoneProjectWiki",
   "version": "0.1.0",
-  "description": "A general user-owned project knowledge base with automatic agent memory and isolated prototypes/assets.",
-  "author": "Bone",
+  "description": "A general user-owned project knowledge base with automatic agent memory, Obsidian-style tree explorer and multi-format asset management.",
+  "author": "taokoplay",
+  "homepage": "https://github.com/taokoplay/bone-project-wiki",
+  "repository": "https://github.com/taokoplay/bone-project-wiki",
+  "categories": ["productivity", "developer-tools"],
+  "i18n": {
+    "en": {
+      "name": "Project Knowledge Base",
+      "description": "General user-owned project knowledge base with Obsidian-style hierarchy, in-place note editor, and media/office asset management.",
+      "safetyNotes": "Operates strictly locally within the project .bone-project-wiki directory. No cloud account or external network calls required."
+    },
+    "zh-CN": {
+      "name": "项目知识库",
+      "description": "用户私有的项目通用知识库，支持类 Obsidian 树形文件浏览器、纯中文 Markdown 笔记无感实时编辑、图片/音视频/PDF/Word/WPS 资产管理与外部目录实时同步。",
+      "safetyNotes": "完全本地运行，仅在当前项目 .bone-project-wiki/ 目录下读写文件，不向外网发送任何数据。"
+    }
+  },
   "main": "main.cjs",
-  "ui": { "panel": "renderer/index.html", "title": "BoneProjectWiki", "width": 1200, "height": 820 },
+  "ui": {
+    "panel": "renderer/index.html",
+    "title": "BoneProjectWiki",
+    "width": 1200,
+    "height": 820
+  },
   "contributes": {
     "commands": [{ "id": "bone-project-wiki.open", "title": "BoneProjectWiki", "keywords": ["wiki", "knowledge", "知识库"] }],
     "views": [{ "id": "wiki", "title": "BoneProjectWiki", "icon": "book", "entry": "renderer/index.html", "order": 30 }],
