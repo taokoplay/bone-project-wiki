@@ -98,11 +98,8 @@ async function existingMemoryContents(cwd) {
 }
 export async function saveAutomaticMemories(cwd, candidates) {
   if (!Array.isArray(candidates) || !candidates.length || typeof cwd !== 'string' || !path.isAbsolute(cwd)) return 0;
-  const root = path.join(cwd, ROOT); const memoryDirectory = path.join(cwd, MEMORY_ROOT);
-  let rootStat;
-  try { rootStat = await fs.lstat(root); } catch (error) { if (error.code === 'ENOENT') return 0; throw error; }
-  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error('UNSAFE_WIKI_ROOT');
-  await fs.mkdir(memoryDirectory, { recursive:true });
+  const memoryDirectory = path.join(cwd, MEMORY_ROOT);
+  await fs.mkdir(memoryDirectory, { recursive: true });
   const existing = await existingMemoryContents(cwd); let saved = 0;
   for (const candidate of candidates.slice(0, 3)) {
     if (!candidate?.content || existing.has(candidate.content) || SENSITIVE_MEMORY.test(candidate.content)) continue;
