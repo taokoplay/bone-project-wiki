@@ -6,7 +6,7 @@ const RECORD_PATH = new RegExp(`^\\${ROOT}/memory/[a-z0-9-]+\\.md$`);
 const RECORD_LIMIT = 256000;
 const INDEX_LIMIT = 4 * 1024 * 1024;
 const MEMORY_LIMIT = 8;
-const EXPLICIT_MEMORY = /(?:请记住|记住(?:这个|一下|到记忆)?|记一下|存(?:入|到)记忆|沉淀到记忆|保存为记忆|备忘|以后(?:请|都|不要|统一|按照)|后续(?:请|都|统一|按照)|我(?:偏好|喜欢|不喜欢|习惯|倾向于|的要求是)|默认(?:请|采用|使用|用)?|(?:项目|设计|代码|接口|开发|命名)(?:规范|约定|要求)|(?:统一采用|统一使用|技术栈采用)|remember(?: that| this)?|keep in mind|note that|i prefer|i like|i don't like|always|never|from now on|by default)/i;
+const EXPLICIT_MEMORY = /(?:请记住|记住(?:这个|一下|到记忆)?|记一下|记录到记忆(?:中)?|记到记忆(?:中)?|存(?:入|到)记忆(?:中)?|写入记忆(?:中)?|沉淀到记忆(?:中)?|保存为记忆(?:中)?|备忘|以后(?:请|都|不要|统一|按照)|后续(?:请|都|统一|按照)|我(?:偏好|喜欢|不喜欢|习惯|倾向于|的要求是)|默认(?:请|采用|使用|用)?|(?:项目|设计|代码|接口|开发|命名)(?:规范|约定|要求)|(?:统一采用|统一使用|技术栈采用)|remember(?: that| this)?|keep in mind|note that|i prefer|i like|i don't like|always|never|from now on|by default)/i;
 const SENSITIVE_MEMORY = /(password|passcode|secret|api[ _-]?key|access[ _-]?token|private[ _-]?key|验证码|密码|口令|私钥|密钥|银行卡|身份证)/i;
 function messageText(message) {
   const content = message?.content;
