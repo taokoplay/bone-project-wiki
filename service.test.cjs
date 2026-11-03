@@ -200,7 +200,7 @@ test('plugin lifecycle registers the public tool and panel dispatch uses the sam
   const f=await fixture(t);const tools=new Map();const commands=new Map();
   global.pi={...f.api,agent:{registerTool:async tool=>tools.set(tool.name,tool),unregisterTool:async name=>tools.delete(name)},commands:{register:async command=>commands.set(command.id,command),unregister:async id=>commands.delete(id)},ui:{openPanel:async()=>{}}};
   t.after(()=>{delete global.pi;});
-  const plugin=require('./main.cjs');await plugin.onLoad();
+  const manifest=require('./manifest.json');assert.equal(manifest.main,'main.js');const plugin=require(`./${manifest.main}`);await plugin.onLoad();
   const tool=tools.get('project_wiki');assert.ok(tool);
   await tool.execute({action:'init',workspacePath:f.root});
   const entry=await tool.execute({action:'save',workspacePath:f.root,title:'Agent requirement',category:'requirements',content:'A representative user path'});
@@ -254,7 +254,7 @@ test('context since reports only records updated after a timestamp',async t=>{
 });
 test('panel locale channel delegates to the public host locale API',async()=>{
   global.pi={app:{getLocale:async()=> 'zh-CN'}};
-  try { assert.equal(await require('./main.cjs').onPanelInvoke('app.getLocale'), 'zh-CN'); }
+  try { assert.equal(await require(`./${require('./manifest.json').main}`).onPanelInvoke('app.getLocale'), 'zh-CN'); }
   finally { delete global.pi; }
 });
 test('a library larger than one listing page is read completely',async t=>{

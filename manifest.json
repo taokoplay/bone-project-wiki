@@ -20,7 +20,7 @@
       "safetyNotes": "完全本地运行，仅在当前项目 .bone-project-wiki/ 目录下读写文件，不向外网发送任何数据。"
     }
   },
-  "main": "main.cjs",
+  "main": "main.js",
   "ui": {
     "panel": "renderer/index.html",
     "title": "BoneProjectWiki",

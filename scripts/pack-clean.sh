@@ -4,7 +4,7 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 stage="$(mktemp -d "${PI_SCRATCH_DIR:-${TMPDIR:-/tmp}}/bone-project-wiki-pack.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT
-cp "$root/manifest.json" "$root/main.cjs" "$root/core.cjs" "$root/service.cjs" "$root/extension.mjs" "$root/README.md" "$root/CHANGELOG.md" "$stage/"
+cp "$root/manifest.json" "$root/main.js" "$root/core.cjs" "$root/service.cjs" "$root/extension.mjs" "$root/README.md" "$root/CHANGELOG.md" "$stage/"
 mkdir -p "$stage/renderer"
 cp "$root/renderer/index.html" "$root/renderer/styles.css" "$root/renderer/host-tokens.css" "$root/renderer/app.mjs" "$root/renderer/content.mjs" "$root/renderer/controls.mjs" "$root/renderer/i18n.mjs" "$stage/renderer/"
 cp -R "$root/skills" "$stage/skills"
