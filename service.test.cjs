@@ -184,8 +184,12 @@ test('agent settled automatically remembers explicit user preferences and skips 
   const f=await fixture(t); await f.request('init');
   const handlers={};
   const {default:extension}=await import('./extension.mjs');
-  extension({on:(name,handler)=>{handlers[name]=handler;},session:{getActive:async()=>({id:'session-1'}),get:async()=>({session:{messages:[{role:'user',content:'Please remember that I prefer concise answers.'},{role:'user',content:'My password is secret-123.'}]}})}});
-  await handlers.agent_settled({type:'agent_settled'},{cwd:f.root,ui:{notify:()=>{throw new Error('unexpected warning');}}});
+  extension({on:(name,handler)=>{handlers[name]=handler;}});
+  const ctx={cwd:f.root,ui:{notify:()=>{throw new Error('unexpected warning');}}};
+  await handlers.before_agent_start({systemPrompt:'BASE',prompt:'Please remember that I prefer concise answers.'},ctx);
+  await handlers.agent_settled({type:'agent_settled'},ctx);
+  await handlers.before_agent_start({systemPrompt:'BASE',prompt:'Please remember that my password is secret-123.'},ctx);
+  await handlers.agent_settled({type:'agent_settled'},ctx);
   const snapshot=await f.request('snapshot');
   const memories=snapshot.sections.memory.entries;
   assert.equal(memories.length,1);

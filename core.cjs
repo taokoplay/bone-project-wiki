@@ -203,7 +203,13 @@ function contextIndex(entries, options = {}) {
   if (memories.length) {
     const shownMax = Math.min(memories.length, memoryMax); push(`## Agent memory (${shownMax} of ${memories.length}, newest first)`);
     let shown = 0;
-    for (const memory of memories.slice(0, shownMax)) { const body = oneLine(memory.content).slice(0, memoryChars); if (!push(`- ${oneLine(memory.title)}${memory.status === 'draft' ? ' [draft]' : ''}: ${body}`)) break; shown += 1; }
+    for (const memory of memories.slice(0, shownMax)) {
+      const fullBody = oneLine(memory.content);
+      const body = fullBody.slice(0, memoryChars);
+      const pointer = memory.path ? ` [${oneLine(memory.path)}]` : '';
+      if (!push(`- ${oneLine(memory.title)}${memory.status === 'draft' ? ' [draft]' : ''}: ${body}${fullBody.length > body.length ? '…' : ''}${pointer}`)) break;
+      shown += 1;
+    }
     if (shown < shownMax) push(`- (+${shownMax - shown} memories omitted; read them with project_wiki)`);
   } else push('No automatic memory recorded yet.');
   push(`## Memory index (${active.length} active of ${entries.length} records)`);
