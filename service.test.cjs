@@ -494,3 +494,30 @@ test('recognizes and handles Word, WPS, PDF, audio and video files properly', as
   assert.equal(readDoc.kind, 'attachment');
   assert.equal(readDoc.files.length, 1);
 });
+
+test('captures automatic memory directly from before_agent_start prompt in real host environment without pi.session', async t => {
+  const f = await fixture(t);
+  await f.request('init');
+  const handlers = {};
+  const { default: extension, readProjectContext } = await import('./extension.mjs');
+  // 真实宿主环境：pi 对象没有 session 属性
+  extension({ on: (name, handler) => { handlers[name] = handler; } });
+
+  // 1. 用户提出要求：before_agent_start 触发
+  const prompt = '请记住：后续统一采用 TailwindCSS 进行前端样式开发';
+  await handlers.before_agent_start({ type: 'before_agent_start', prompt, systemPrompt: 'Base system prompt' }, { cwd: f.root });
+
+  // 2. 轮次结算：agent_settled 触发
+  await handlers.agent_settled({ type: 'agent_settled' }, { cwd: f.root });
+
+  // 3. 验证记忆被持久化落盘
+  const snap = await f.request('snapshot');
+  const memories = snap.sections.memory.entries;
+  assert.equal(memories.length, 1);
+  assert.equal(memories[0].source, 'automatic-agent-memory');
+  const read = await f.request('read', { id: memories[0].id, section: 'memory' });
+  assert.match(read.content, /TailwindCSS/);
+  // 4. 下一次会话启动时，验证已被自动注入进上下文
+  const context = await readProjectContext(f.root);
+  assert.match(context, /TailwindCSS/);
+});
