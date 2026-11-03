@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "bone.project-wiki",
+  "name": "BoneProjectWiki",
+  "version": "0.1.0",
+  "description": "A general user-owned project knowledge base with automatic agent memory and isolated prototypes/assets.",
+  "author": "Bone",
+  "main": "main.cjs",
+  "ui": { "panel": "renderer/index.html", "title": "BoneProjectWiki", "width": 1200, "height": 820 },
+  "contributes": {
+    "commands": [{ "id": "bone-project-wiki.open", "title": "BoneProjectWiki", "keywords": ["wiki", "knowledge", "知识库"] }],
+    "views": [{ "id": "wiki", "title": "BoneProjectWiki", "icon": "book", "entry": "renderer/index.html", "order": 30 }],
+    "agentTools": [{ "name": "project_wiki", "description": "Read and maintain the current project's knowledge, prototypes, assets and memory.", "risk": "medium" }],
+    "skills": ["skills/project-wiki.md"],
+    "agentExtensions": ["extension.mjs"]
+  },
+  "permissions": ["ui.panel", "ui.view", "fs.read", "fs.write", "fs.delete", "agent.tool.register", "agent.prompt.inject", "agent.extension"],
+  "fs": {
+    "read": { "root": "workspace", "scope": [".bone-project-wiki/**"] },
+    "write": { "root": "workspace", "scope": [".bone-project-wiki/**"] },
+    "delete": { "own": false, "scope": [".bone-project-wiki/memory/**"] }
+  },
+  "engines": { "piDesktop": ">=0.4.22" },
+  "activationEvents": ["onStartup", "onCommand:bone-project-wiki.open"]
+}
