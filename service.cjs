@@ -1,5 +1,8 @@
 'use strict';
 const { ROOT, KNOWLEDGE_ROOT, MEMORY_ROOT, DEVELOPMENT_ROOT, SECTIONS, isKnowledgeCategory, hash, text, id, encode, decode, summarize, normalize, validateFiles, contextText, sectionForEntry, sectionRoot, recordPath, indexPath, safeFileId } = require('./core.cjs');
+const { DocumentMemories } = require('./document-memory.cjs');
+const { stableRecordId, validRecordId } = require('./document-links.cjs');
+const { normalizeScopePaths } = require('./memory-selection.cjs');
 const escapeHtml = value => String(value).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const notFound = error => {
   const code = String(error?.code ?? error?.errorCode ?? '');
@@ -17,10 +20,10 @@ const WPS_EXTS = new Set(['wps', 'wpt', 'et', 'ett', 'dps', 'dpt']);
 const INDEX_VERSION = 1;
 const LIST_PAGE = 1000;
 const RACY_WINDOW_MS = 2000;
-const META_FIELDS = ['schemaVersion','id','title','category','kind','status','tags','topics','source','createdAt','updatedAt','path','revision','section'];
+const META_FIELDS = ['schemaVersion','id','recordId','documentRef','documentLink','scopePaths','importance','title','category','kind','status','tags','topics','source','createdAt','updatedAt','path','revision','section'];
 const publicMeta = source => META_FIELDS.reduce((meta, key) => { if (source[key] !== undefined) meta[key] = source[key]; return meta; }, {});
 class WikiService {
-  constructor(pi) { this.pi = pi; this.queue = Promise.resolve(); this.disposed = false; this.racyWindowMs = RACY_WINDOW_MS; this.listPage = LIST_PAGE; }
+  constructor(pi) { this.pi = pi; this.queue = Promise.resolve(); this.disposed = false; this.racyWindowMs = RACY_WINDOW_MS; this.listPage = LIST_PAGE; this.documentMemories = new DocumentMemories(this); }
   dispose() { this.disposed = true; }
   async workspace(expected) {
     if (this.disposed) throw new Error('PLUGIN_UNLOADED');
@@ -194,7 +197,8 @@ class WikiService {
   }
   async loadRecord(meta, workspacePath) {
     if (meta.path.endsWith('.md')) {
-      return decode(await this.readFile(meta.path, workspacePath), meta.path);
+      const entry = decode(await this.readFile(meta.path, workspacePath), meta.path);
+      return this.documentMemories.resolve(entry, workspacePath);
     }
     const fileName = meta.path.split('/').at(-1);
     let previewDataUrl = '';
@@ -220,9 +224,10 @@ class WikiService {
       return { workspacePath: workspace.path, projectName: workspace.name, initialized: false, entries: [], corrupted: [], sections: emptySections };
     }
     const scanned = await this.scanAll(workspace.path);
+    const memories = await this.documentMemories.projectRows(scanned.memory.entries, scanned.knowledge.rows, workspace.path);
     const sections = {
       knowledge: { categories: scanned.knowledge.categories || [], entries: scanned.knowledge.entries.map(summarize), corrupted: scanned.knowledge.corrupted },
-      memory: { entries: scanned.memory.entries.map(summarize), corrupted: scanned.memory.corrupted },
+      memory: { entries: memories.map(summarize), corrupted: scanned.memory.corrupted },
       development: { entries: scanned.development.entries.map(summarize), corrupted: scanned.development.corrupted },
     };
     return { workspacePath: workspace.path, projectName: workspace.name, initialized: true, entries: [...sections.knowledge.entries, ...sections.memory.entries, ...sections.development.entries], corrupted: [...sections.knowledge.corrupted, ...sections.memory.corrupted, ...sections.development.corrupted], sections };
@@ -243,15 +248,27 @@ class WikiService {
     return this.snapshot();
   }
   async read(input) {
-    const documentId = id(input.id);
+    const explicit = input.recordId !== undefined;
+    if (explicit && !validRecordId(input.recordId)) throw new Error('INVALID_RECORD_ID');
+    const documentId = explicit ? input.recordId : id(input.id);
+    const stable = validRecordId(documentId);
     for (const section of this.sectionsForInput(input)) {
-      const { entries, corrupted } = await this.scan(section, input.workspacePath);
-      const meta = entries.find(entry => entry.id === documentId);
+      const { entries, corrupted } = await this.scan(section, input.workspacePath, { reindex: stable && section === 'knowledge' });
+      const filename = explicit ? undefined : entries.find(entry => entry.id === documentId);
+      let identity;
+      if (stable) {
+        const matches = entries.filter(entry => entry.kind === 'document' && stableRecordId(entry) === documentId);
+        const active = matches.filter(entry => entry.status !== 'archived');
+        if (active.length > 1) throw new Error('AMBIGUOUS_DOCUMENT');
+        identity = active[0] || matches[0];
+      }
+      if (filename && identity && filename.path !== identity.path) throw new Error('AMBIGUOUS_DOCUMENT');
+      const meta = identity || filename;
       if (meta) {
         try { return await this.loadRecord(meta, input.workspacePath); }
         catch (error) { throw new Error(`DOCUMENT_CORRUPTED: ${documentId} could not be read (${error?.message || error})`); }
       }
-      if (corrupted.some(item => item.id === documentId)) throw new Error(`DOCUMENT_CORRUPTED: ${documentId} exists but cannot be parsed; repair or delete that file, then retry`);
+      if (!explicit && corrupted.some(item => item.id === documentId)) throw new Error(`DOCUMENT_CORRUPTED: ${documentId} exists but cannot be parsed; repair or delete that file, then retry`);
     }
     throw new Error('DOCUMENT_NOT_FOUND');
   }
@@ -265,7 +282,7 @@ class WikiService {
   async save(input) {
     await this.initialized(input.workspacePath);
     let previous;
-    if (input.id) previous = await this.read(input);
+    if (input.id || input.recordId) previous = await this.read(input);
     if (previous && input.expectedRevision !== previous.revision) throw new Error('REVISION_CONFLICT: reload before saving; your draft has not been written');
     if (!previous && !['document','memory','handoff'].includes(input.kind || 'document')) throw new Error('USE_IMPORT_FOR_ASSETS');
     const entry = normalize(input, previous);
@@ -338,9 +355,14 @@ class WikiService {
   async context(input) {
     const scanned = await this.scanAll(input.workspacePath); const entries = SECTIONS.flatMap(section => scanned[section].entries);
     if (input.since !== undefined) { const since = Date.parse(String(input.since)); if (!Number.isFinite(since)) throw new Error('INVALID_SINCE: use an ISO timestamp'); return { since:new Date(since).toISOString(), count:entries.filter(entry => Date.parse(entry.updatedAt) > since).length, changed:entries.filter(entry => Date.parse(entry.updatedAt) > since) }; }
-    const query = String(input.query || ''); const wanted = entries.filter(entry => entry.status !== 'archived' && (entry.kind === 'memory' || entry.kind === 'handoff' || entry.category === 'overview' || (query && `${entry.title} ${entry.topics.join(' ')}`.toLowerCase().includes(query.toLowerCase())))).sort((a,b) => (a.kind === 'memory' ? -1 : 0) - (b.kind === 'memory' ? -1 : 0) || b.updatedAt.localeCompare(a.updatedAt)).slice(0, 16); const loaded = [];
+    const query = text(input.query || '', 'query', 32000);
+    const paths = normalizeScopePaths(input.paths);
+    const loaded = await this.documentMemories.projectRows(scanned.memory.entries, scanned.knowledge.rows, input.workspacePath, { readBodies: true });
+    const wanted = entries.filter(entry => entry.kind !== 'memory' && entry.category !== 'memory' && entry.status !== 'archived'
+      && (entry.kind === 'handoff' || entry.category === 'overview' || (query && `${entry.title} ${entry.topics.join(' ')}`.toLowerCase().includes(query.toLowerCase()))))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 16);
     for (const meta of wanted) { try { loaded.push(await this.loadRecord(meta, input.workspacePath)); } catch { /* changed under us */ } }
-    return { text: contextText(loaded, query) };
+    return { text: contextText(loaded, query, { paths }) };
   }
   async preferencesGet() { const settings = await this.pi.plugin.getSettings(); const content = typeof settings.personalPreferences === 'string' ? settings.personalPreferences : ''; return { content, revision:hash(content) }; }
   async exportHtml(input) {
@@ -454,6 +476,7 @@ class WikiService {
       case 'init': return this.init(input.workspacePath);
       case 'read': return this.read(input);
       case 'save': return this.save(input);
+      case 'remember': return this.documentMemories.remember(input);
       case 'import': return this.importFiles(input);
       case 'search': return this.search(input);
       case 'context': return this.context(input);

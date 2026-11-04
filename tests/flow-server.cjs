@@ -8,12 +8,13 @@ const {WikiService} = require('../service.cjs');
 async function main() {
   const root = await fs.mkdtemp(path.join(process.env.PI_SCRATCH_DIR || os.tmpdir(),'bone-wiki-flow-'));
   let settings = {};
+  let failMemory = false;
   const service = new WikiService({
     workspace:{get:async()=>({path:root,name:'BoneProjectWiki acceptance'})},
     plugin:{getSettings:async()=>settings,setSettings:async patch=>{settings={...settings,...patch};}},
     fs:{
       readText:p=>fs.readFile(path.join(root,p),'utf8'),
-      writeText:async(p,data)=>{const target=path.join(root,p);await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,data);},
+      writeText:async(p,data)=>{if(failMemory && p.startsWith('.bone-project-wiki/memory/') && p.endsWith('.md'))throw new Error('Test memory write failure');const target=path.join(root,p);await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,data);},
       remove:p=>fs.unlink(path.join(root,p)),
       stat:async p=>{const info=await fs.stat(path.join(root,p));return {size:info.size,mtimeMs:info.mtimeMs};},
       list:async dir=>{
@@ -34,6 +35,11 @@ async function main() {
   const server=http.createServer(async(req,res)=>{
     try {
       const route=new URL(req.url,'http://localhost').pathname;
+      if(route==='/test/fail-memory' && req.method==='POST'){
+        const chunks=[];for await(const chunk of req)chunks.push(chunk);
+        failMemory=JSON.parse(Buffer.concat(chunks).toString()).enabled===true;
+        res.setHeader('Content-Type','application/json');res.end(JSON.stringify({enabled:failMemory}));return;
+      }
       if(route==='/call' && req.method==='POST'){
         const chunks=[];let size=0;
         for await(const chunk of req){size+=chunk.length;if(size>20*1024*1024)throw new Error('REQUEST_LIMIT');chunks.push(chunk);}

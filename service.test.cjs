@@ -299,7 +299,7 @@ test('turn-start context is a budgeted index with rules inline and bodies by poi
   entries.push({id:'a1',title:'Archived rule',category:'memory',kind:'memory',status:'archived',updatedAt:'2026-03-01T00:00:00.000Z',content:'must not appear'});
   const block=contextIndex(entries);
   assert.ok(block.length<=1200,`block is ${block.length} chars`);
-  assert.match(block,/## Agent memory \(6 of 9, newest first\)/);
+  assert.match(block,/## Agent memory \(6 of 9, relevance then recency\)/);
   assert.match(block,/Rule 8/);
   assert.doesNotMatch(block,/Rule 0:/);
   assert.doesNotMatch(block,/must not appear/);
@@ -307,9 +307,10 @@ test('turn-start context is a budgeted index with rules inline and bodies by poi
   assert.doesNotMatch(block,/Handoff A/);
   assert.match(block,/\{action:"read",id\}/);
   assert.doesNotMatch(block,/x{200}/);
-  const pressure=contextIndex([3,2,1,0].map(index=>rule(index,'y'.repeat(5000))));
-  assert.ok(pressure.length<=1200,`pressure block is ${pressure.length} chars`);
-  assert.match(pressure,/memories omitted/);
+  const pressure=contextIndex([3,2,1,0].map(index=>rule(index,'y'.repeat(5000))),{maxChars:700});
+  assert.ok(pressure.length<=700,`pressure block is ${pressure.length} chars`);
+  assert.match(pressure,/read full memory/);
+  assert.doesNotMatch(pressure,/y{20}/);
   assert.match(contextIndex([]),/No automatic memory recorded yet/);
 });
 test('the record index reuses unchanged records and re-reads only what changed',async t=>{

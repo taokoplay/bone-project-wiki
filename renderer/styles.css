@@ -210,3 +210,17 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
 .image-preview { max-width: 100%; height: auto; max-height: 680px; object-fit: contain; border-radius: 8px; border: 1px solid var(--line); margin-top: 12px; background: var(--wash); }
 .media-audio-player { width: 100%; max-width: 520px; margin: 16px 0; outline: none; }
 .media-video-player { width: 100%; max-width: 720px; max-height: 480px; border-radius: 8px; border: 1px solid var(--line); margin: 16px 0; background: #000; outline: none; }
+
+.document-memory-card, .document-memory-editor { border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; margin-top: 16px; }
+.document-memory-card h3 { margin: 0 0 8px; }
+.document-memory-card .hint, .document-memory-editor .hint { margin: 6px 0 12px; overflow-wrap: anywhere; }
+.document-memory-editor > summary { cursor: pointer; font-weight: 550; }
+.document-memory-form { display: grid; gap: 12px; margin-top: 12px; }
+.document-memory-form textarea { min-height: 90px; }
+.document-memory-form button { justify-self: start; }
+.memory-confirm { display: flex; align-items: start; gap: 8px; }
+.memory-confirm input { width: auto; margin-top: 3px; }
+.memory-policy-editor { flex: 0 0 auto; margin-top: 12px; padding: 12px 0; border-top: 1px dashed var(--line); }
+.memory-policy-editor > summary { cursor: pointer; font-weight: 550; }
+.memory-policy-editor > .field, .memory-policy-editor > .memory-confirm { margin-top: 12px; }
+.memory-policy-editor .hint { overflow-wrap: anywhere; }

@@ -1,10 +1,12 @@
 import { t, setLocale, errorText } from './i18n.mjs';
 import { markdown, buildPrototype, safeImage, collectFiles } from './content.mjs';
 import { createSelect, closeAnyControl, showContextMenu } from './controls.mjs';
+import { linkedDocumentCard, rememberDocumentForm } from './document-memory.mjs';
+import { memoryFields } from './memory-fields.mjs';
 
 const bridge = window.pluginBridge;
 const app = document.querySelector('#app');
-const state = { snapshot: null, section: 'knowledge', category: '', topic: '', query: '', results: null, entry: null, mode: 'read', dirty: false, stale: false, busy: false, epoch: 0, view: 0, search: 0 };
+const state = { snapshot: null, section: 'knowledge', category: '', topic: '', query: '', results: null, entry: null, mode: 'read', dirty: false, stale: false, busy: false, epoch: 0, view: 0, search: 0, memoryDraft: null };
 let detail, records, notice, searchTimer, editorDialog;
 const sectionEntries = section => { const snapshotEntries = state.snapshot?.entries || []; if (section === 'memory') return state.snapshot?.sections ? [...(state.snapshot.sections.memory?.entries || []), ...(state.snapshot.sections.development?.entries || [])] : snapshotEntries.filter(entry => entry.kind === 'memory' || entry.category === 'memory' || entry.kind === 'handoff' || entry.category === 'development'); if (section === 'knowledge') return state.snapshot?.sections?.knowledge?.entries || snapshotEntries.filter(entry => entry.kind !== 'memory' && entry.category !== 'memory' && entry.kind !== 'handoff' && entry.category !== 'development'); return state.snapshot?.sections?.[section]?.entries || []; };
 const knowledgeCategories = () => {
@@ -80,7 +82,8 @@ const active = epoch => epoch === state.epoch;
 function lock() {
   document.querySelectorAll('[data-mutation]').forEach(node => { node.disabled = state.busy || state.stale || !state.snapshot?.workspacePath; });
   document.querySelectorAll('form').forEach(node => { node.inert = state.busy; });
-  document.querySelectorAll('.note-title-input, .note-content-input, [name=\"title\"], [name=\"content\"]').forEach(node => { if (state.stale) node.readOnly = true; });
+  document.querySelectorAll('.memory-policy-editor').forEach(node => { node.inert = state.busy || state.stale; });
+  document.querySelectorAll('.note-title-input, .note-content-input, [name="title"], [name="content"], [name="memorySummary"], [name="readWhen"]').forEach(node => { if (state.stale) node.readOnly = true; });
   app.setAttribute('aria-busy', String(state.busy));
 }
 function mutation(node) { node.dataset.mutation = ''; return node; }
@@ -102,8 +105,8 @@ async function perform(work) {
 }
 function leave() {
   if (state.busy) return false;
-  if (state.dirty && !window.confirm(t('discard'))) return false;
-  state.dirty = false;
+  if ((state.dirty || state.memoryDraft) && !window.confirm(t('discard'))) return false;
+  state.dirty = false; state.memoryDraft = null;
   if (state.stale) { refresh(); return false; }
   return true;
 }
@@ -420,12 +423,18 @@ async function runSearch(serial) {
   } catch (error) { if (active(epoch) && serial === state.search) problem(error); }
 }
 async function refresh() {
+  const workspacePath = state.snapshot?.workspacePath || state.memoryDraft?.workspacePath;
+  const draft = state.memoryDraft;
   const epoch = ++state.epoch; state.view++; state.search++;
   state.dirty = false; state.stale = false; state.busy = false; state.entry = null; state.results = null; state.query = ''; state.topic = ''; state.snapshot = null; state.mode = 'read'; state.drawer = false;
   renderShell(); empty(detail, 'loading', 'pending');
   try {
     state.snapshot = await request('snapshot', {}, epoch);
+    if (state.snapshot.workspacePath !== workspacePath) state.memoryDraft = null;
+    const restoreDraft = draft && state.memoryDraft === draft && draft.workspacePath === state.snapshot.workspacePath;
+    if (restoreDraft) { state.section = 'knowledge'; state.category = ''; }
     renderShell(); renderList(); renderDetail();
+    if (restoreDraft) void openRecord({ recordId: draft.recordId, section: 'knowledge' });
     if (state.snapshot.corrupted?.length) message(`${t('corrupted')}: ${state.snapshot.corrupted.map(item => item.path).join(', ')}`, true);
   } catch (error) {
     if (!active(epoch)) return;
@@ -661,6 +670,7 @@ let autoSaveTimer = null;
 function renderNoteEditor(entry) {
   detail.replaceChildren();
   const form = element('form', undefined, 'note-editor');
+  const editorEpoch = state.epoch, editorView = state.view;
   const titleInput = element('input', undefined, 'note-title-input');
   titleInput.type = 'text'; titleInput.name = 'title'; titleInput.placeholder = t('title'); titleInput.value = entry?.title || '';
   const divider = element('div', undefined, 'note-title-divider');
@@ -683,7 +693,25 @@ function renderNoteEditor(entry) {
     })));
     form.append(memoryBar);
   }
+  if (entry?.documentRef) {
+    titleInput.readOnly = true; contentInput.readOnly = true;
+    form.insertBefore(linkedDocumentCard(entry, t, id => {
+      if (!leave()) return;
+      state.section = 'knowledge'; state.category = ''; state.query = ''; state.results = null;
+      renderShell(); renderList(); void openRecord({ recordId: id, section: 'knowledge' });
+    }), contentInput);
+    contentInput.hidden = entry.documentLink?.state !== 'current';
+    form.addEventListener('submit', event => event.preventDefault());
+    detail.append(form); lock(); return;
+  }
+  let editVersion = 0, saving = false;
+  const settings = entry?.kind === 'memory' || (!entry && state.section === 'memory') ? memoryFields(t, entry || {}, { confirmation: true }) : null;
+  if (settings) {
+    form.insertBefore(settings.element, submitBtn);
+    settings.element.addEventListener('input', onInput);
+  }
   async function performSave() {
+    if (saving || !form.isConnected || !active(editorEpoch) || editorView !== state.view || state.stale || state.busy) return;
     const rawTitle = titleInput.value.trim();
     const content = contentInput.value;
     if (!rawTitle && !content.trim() && !state.entry) return;
@@ -692,8 +720,11 @@ function renderNoteEditor(entry) {
       const firstLine = content.trim().split('\n')[0]?.replace(/^[#\s*-]+/, '').trim();
       title = firstLine ? firstLine.slice(0, 50) : (state.entry?.title || '未命名文档');
     }
-    const category = entry?.category || (state.section === 'knowledge' && state.category ? state.category : 'general');
+    const category = entry?.category || (state.section === 'memory' ? 'memory' : state.category || 'general');
     const epoch = state.epoch;
+    const version = editVersion;
+    let saveAgain = false;
+    saving = true;
 
     try {
       const saved = await request('save', {
@@ -702,19 +733,28 @@ function renderNoteEditor(entry) {
         category,
         kind: entry?.kind || (state.section === 'memory' ? 'memory' : 'document'),
         status: entry?.status || 'draft',
+        source: entry?.source || '',
         topics: entry?.topics || [],
         tags: entry?.tags || [],
-        ...(state.entry ? { id: state.entry.id, expectedRevision: state.entry.revision } : {})
+        ...(settings ? settings.read() : {}),
+        ...(state.entry ? { id: state.entry.id, ...(state.entry.kind === 'document' ? { recordId: state.entry.recordId } : {}), expectedRevision: state.entry.revision } : {})
       }, epoch);
+      if (editorView !== state.view || !form.isConnected) return;
       state.entry = saved;
+      if (editVersion !== version) { saveAgain = true; return; }
+      const rendered = await updateSnapshot(epoch, () => editVersion === version && editorView === state.view && form.isConnected);
+      if (!rendered) { saveAgain = editVersion !== version; return; }
       state.dirty = false;
-      await updateSnapshot(epoch);
       message(t('saved'));
     } catch (err) {
       message(errorText(err), true);
+    } finally {
+      saving = false;
+      if (saveAgain) void performSave();
     }
   }
   function onInput() {
+    editVersion++;
     state.dirty = true;
     clearTimeout(autoSaveTimer);
     autoSaveTimer = setTimeout(performSave, 350);
@@ -727,18 +767,48 @@ function renderNoteEditor(entry) {
     performSave();
   });
   detail.append(form);
+  if (entry?.kind === 'document' && entry.status !== 'archived') {
+    const workspacePath = state.snapshot.workspacePath;
+    const draft = state.memoryDraft?.workspacePath === workspacePath && state.memoryDraft.recordId === entry.recordId ? state.memoryDraft : null;
+    const policy = sectionEntries('memory').find(row => row.documentRef?.recordId === entry.recordId);
+    const captureDraft = values => {
+      if (!active(editorEpoch) || editorView !== state.view || state.stale) return;
+      const policyChanged = JSON.stringify(values.scopePaths || []) !== JSON.stringify(policy?.scopePaths || [])
+        || (values.importance || 'normal') !== (policy?.importance || 'normal');
+      state.memoryDraft = values.summary || values.readWhen || policyChanged ? { workspacePath, recordId: entry.recordId, ...values } : null;
+      message(t('unsaved'));
+    };
+    detail.append(rememberDocumentForm(entry, t, { draft, policy, onDraftChange: captureDraft, onRemember: values => {
+      if (state.dirty) { problem(new Error(t('saveBeforeLink'))); return; }
+      captureDraft(values);
+      void perform(async epoch => {
+        const saved = await request('remember', { ...state.entry, ...values, kind: 'document', status: 'confirmed', expectedRevision: state.entry.revision }, epoch);
+        state.entry = saved.document;
+        if (saved.linked) state.memoryDraft = null;
+        await updateSnapshot(epoch);
+        message(t(saved.linked ? 'memoryLinked' : 'memoryLinkPartial'), !saved.linked);
+      });
+    } }));
+  }
   lock();
 }
-async function openRecord(id) {
+async function openRecord(selector) {
+  const payload = typeof selector === 'string' ? { id: selector } : selector;
   const view = ++state.view, epoch = state.epoch; state.mode = 'read';
   empty(detail, 'loading', 'pending');
-  try { const entry = await request('read', { id }, epoch); if (view !== state.view) return; state.entry = entry; renderList(); renderDetail(); }
-  catch (error) { if (active(epoch) && view === state.view) { empty(detail, 'error', 'retry', button('retry', () => openRecord(id))); problem(error); } }
+  try { const entry = await request('read', payload, epoch); if (view !== state.view) return; state.entry = entry; renderList(); renderDetail(); }
+  catch (error) { if (active(epoch) && view === state.view) { empty(detail, 'error', 'retry', button('retry', () => openRecord(selector))); problem(error); } }
 }
-async function updateSnapshot(epoch) {
-  state.snapshot = await request('snapshot', {}, epoch);
+async function updateSnapshot(epoch, isCurrent = () => true) {
+  const snapshot = await request('snapshot', {}, epoch);
+  if (!isCurrent()) return false;
+  if (snapshot.workspacePath !== state.snapshot?.workspacePath) {
+    state.memoryDraft = null; state.entry = null; state.dirty = false; state.view++;
+  }
+  state.snapshot = snapshot;
   state.results = null; state.query = ''; state.search++;
   renderShell(); renderList(); renderDetail();
+  return true;
 }
 function field(form, name, label, value = '') {
   const wrapper = element('label', undefined, 'field'); wrapper.append(element('span', t(label)));
@@ -898,9 +968,11 @@ function importView() {
   });
 }
 function workspaceChanged() {
-  if (state.dirty) {
+  if (state.dirty || state.memoryDraft) {
     state.epoch++; state.view++; state.search++; state.stale = true; state.busy = false;
-    message(t('stale'), true); notice.append(document.createTextNode(' '), button('discardDraft', () => { if (window.confirm(t('discard'))) refresh(); })); lock();
+    message(t('stale'), true); notice.append(document.createTextNode(' '), button('discardDraft', () => {
+      if (window.confirm(t('discard'))) { state.memoryDraft = null; refresh(); }
+    })); lock();
   } else refresh();
 }
 function appearance(value) {
@@ -911,7 +983,7 @@ function appearance(value) {
   if (!theme) { theme = document.createElement('style'); theme.id = 'host-plugin-theme'; document.head.append(theme); }
   theme.textContent = typeof value?.pluginTheme?.css === 'string' ? value.pluginTheme.css : '';
 }
-window.addEventListener('beforeunload', event => { if (state.dirty) { event.preventDefault(); event.returnValue = ''; } });
+window.addEventListener('beforeunload', event => { if (state.dirty || state.memoryDraft) { event.preventDefault(); event.returnValue = ''; } });
 let dropOverlay = null;
 async function extractDropEntries(dataTransfer) {
   const result = [];

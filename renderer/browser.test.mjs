@@ -86,6 +86,11 @@ try {
             const entry = { ...input, id: input.id || `record-${data.entries.length + 1}`, revision: (input.expectedRevision || 0) + 1, updatedAt: '2026-01-01' };
             data.entries = data.entries.filter(item => item.id !== entry.id); data.entries.push(entry); return structuredClone(entry);
           }
+          case 'remember': {
+            const document = { ...data.entries.find(entry => entry.recordId === input.recordId), revision: input.expectedRevision + 1, status: 'confirmed' };
+            data.entries = data.entries.map(entry => entry.recordId === document.recordId ? document : entry);
+            return { document: structuredClone(document), memory: null, linked: false, linkError: 'Test memory link failure' };
+          }
           case 'read':
             if (window.fixture.deferRead) return new Promise(resolve => { window.fixture.resolveRead = () => resolve(structuredClone(data.entries.find(entry => entry.id === input.id))); });
             return structuredClone(data.entries.find(entry => entry.id === input.id));
@@ -227,6 +232,32 @@ try {
   assert.equal(await evaluate(`document.querySelector('[name=\"title\"]').readOnly`), true);
   // Locale lookup controls visible labels.
   await click('Discard draft and refresh'); await wait(`document.querySelector('.record')`);
+  // A saved-document/failed-link draft belongs to its project, even when another project copies the identity.
+  await evaluate(`fixture.deferRead=false; fixture.data.entries=[{id:'rule-source',recordId:'11111111-1111-4111-8111-111111111111',title:'Source rules',kind:'document',category:'general',status:'confirmed',content:'Complete source rules.',topics:[],tags:[],revision:1,updatedAt:'2026-01-01'}]; window.wikiUi.refresh()`);
+  await wait(`document.querySelector('.record strong')?.textContent === 'Source rules'`);
+  await evaluate(`document.querySelector('.record').click()`);
+  await wait(`document.querySelector('[name="memorySummary"]')`);
+  await evaluate(`document.querySelector('.document-memory-editor').open=true`);
+  await fill('memorySummary', 'Project A summary must stay in project A.');
+  await fill('readWhen', 'Before changing project A rules.');
+  await evaluate(`document.querySelector('[name="confirmDocument"]').checked=true; document.querySelector('.document-memory-form').requestSubmit()`);
+  await wait(`document.body.textContent.includes('Document saved; memory link failed')`);
+  await evaluate(`fixture.data.workspacePath='/demo/copied-project'; window.wikiUi.refresh()`);
+  await wait(`document.querySelector('.record strong')?.textContent === 'Source rules'`);
+  await evaluate(`document.querySelector('.record').click()`);
+  await wait(`document.querySelector('[name="memorySummary"]')`);
+  assert.equal(await evaluate(`document.querySelector('[name="memorySummary"]').value`), '');
+  assert.equal(await evaluate(`document.querySelector('[name="readWhen"]').value`), '');
+  // Unsubmitted input also participates in project-change and unload guards.
+  await evaluate(`document.querySelector('.document-memory-editor').open=true`);
+  await fill('memorySummary', 'Retain this summary until explicitly discarded.');
+  assert.equal(await evaluate(`(() => { const event = new Event('beforeunload', {cancelable:true}); window.dispatchEvent(event); return event.defaultPrevented; })()`), true);
+  await evaluate(`fixture.data.workspacePath='/demo/third-project'; fixture.listeners['workspace:changed']()`);
+  await wait(`document.body.textContent.includes('Saving is blocked')`);
+  assert.equal(await evaluate(`document.querySelector('[name="memorySummary"]').readOnly`), true);
+  assert.equal(await evaluate(`document.querySelector('[name="memorySummary"]').value`), 'Retain this summary until explicitly discarded.');
+  await click('Discard draft and refresh');
+  await wait(`document.querySelector('.record')`);
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: "window.fixture.locale = 'zh-CN';" });
   const reloaded = new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('Reload timed out')), 10000);
@@ -268,7 +299,7 @@ try {
   // Folder + button adds note directly under that folder
   await evaluate(`document.querySelector('.tree-folder-add').click()`);
   assert.equal(await evaluate(`document.querySelector('.detail input[name="title"]').value`), '');
-  console.log('PASS: init, create/update, revision conflict, preserved stale draft, preferences, context, memory deletion, bundle import, directory side panel, opaque prototype isolation, inline interactions, CSP, binary/size limits, responsive widths, keyboard focus, reduced motion, stale reads, Chinese locale.');
+  console.log('PASS: init, create/update, revision conflict, preserved stale draft, isolated document-summary drafts, project-change guards, preferences, context, memory deletion, bundle import, directory side panel, opaque prototype isolation, inline interactions, CSP, binary/size limits, responsive widths, keyboard focus, reduced motion, stale reads, Chinese locale.');
 } finally {
   socket?.close();
   chrome.kill('SIGTERM');
