@@ -7,7 +7,7 @@
 ## 核心特性
 
 - **类 Obsidian 层级文件树**：左侧树形目录导航，支持文件夹无极层级折叠展开、新建目录、折叠/展开全部、快速刷新。
-- **无感实时笔记编辑器**：右侧实时在线笔记编辑，采用防抖自动保存技术；标题与磁盘物理文件名（`[标题].md`）实时双向联动，纯中文路径与文件名真实落盘，无 UUID 乱码。
+- **Markdown reading and source editing**: existing notes open as formatted read-only documents. Use **Edit record** to edit the source with automatic saving; **Read mode** waits for the latest save before showing the formatted result. New records start in editing mode. Titles continue to determine their Markdown filenames.
 - **全格式文件与多媒体支持**：
   - **文档**：原生 Markdown（`.md`）、纯文本（`.txt`）、Word 文档（`.docx`, `.doc`）、WPS 文档（`.wps`, `.wpt`）、PDF（`.pdf`）。
   - **表格**：Excel 电子表格（`.xlsx`, `.xls`, `.csv`）、WPS 表格（`.et`, `.ett`）。
@@ -25,13 +25,18 @@
    - 打开项目知识库面板；
    - 点击“初始化知识库”，即可在当前项目目录下创建标准 `.bone-project-wiki/` 知识库目录结构。
 2. **日常记录与整理**：
-   - 在右侧直接输入标题与内容，系统自动保存并实时在左侧目录树生成对应的 `.md` 文件；
+   - Create a record and enter its title and source; automatic saving creates the Markdown file in the tree. Existing records open in read-only mode with an explicit edit action;
    - 支持右键点击笔记或文件夹进行：**移动到…**、**在文件管理器中打开**、**删除**；
    - 拖拽任意多层文件夹或文档进入面板，自动递归解析并创建对应分类目录。
 3. **打开与查看各类资产**：
-   - 笔记直接在右侧实时编辑；
+   - Markdown notes display formatted headings, emphasis, nested lists, quotes, tables, code and task lists. Read/edit switching preserves revision checks, pending input and conflict drafts. Linked memory summaries remain read-only;
    - 图片自适应大图查看；音频与视频直接在右侧面板内嵌原生控件播放；
+   - HTML/HTM 文件在面板内展示网页，支持已有 HTML 附件以及直接拷入知识目录的文件，无需重新导入为原型；
+   - 页面可使用内联样式、普通脚本及目录内引用的 CSS/JS 和 PNG/JPEG/WEBP/GIF 图片。预览为隔离环境，远程请求、模块脚本、子页面嵌入、表单提交和弹窗仍不支持；
+   - 预览最多读取 100 个文件、合计 10 MB；缺失资源或无法读取会提示，并保留系统浏览器打开入口。原文件不会被转换或覆盖；
    - Word、WPS、Excel、PDF 等办公文档提供一键“在系统中打开”与“在访达中定位”。
+
+Markdown rendering runs fully offline and follows the host theme. Source HTML is displayed as text; relative/remote images show alternative text without automatic file or network requests. See [Markdown reading and editing](docs/markdown-view.md) and [third-party licenses](THIRD_PARTY_LICENSES.md).
 
 ## 记忆如何生效
 

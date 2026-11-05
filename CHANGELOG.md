@@ -1,5 +1,17 @@
 # 更新日志（CHANGELOG）
 
+## 0.2.1 (HTML preview and Markdown reading)
+
+- Markdown documents now open in a formatted read-only view, with explicit source editing and automatic saving. New records start in editing mode.
+- Added rich headings, emphasis, links, nested lists, quotes, tables, code blocks and task lists, with host-theme typography and contained horizontal scrolling.
+- Returning to reading waits for the latest source input to save; in-flight inputs, failed writes and revision-conflict drafts remain protected. Linked memory summaries stay read-only.
+- Markdown parsing is bundled for offline use. Source HTML stays literal; unsafe links and implicit remote image requests remain inactive.
+- HTML/HTM files copied directly into the knowledge directory now display as webpages in the panel.
+- Existing HTML attachments and cached records use the same preview, loading local styles, classic scripts and PNG/JPEG/WebP/GIF images on demand.
+- Missing resources, read failures and preview limits are reported with system-open and file-location actions retained. The existing iframe sandbox remains in force.
+- Returning from webpage interaction to the file tree no longer loses the selection to an automatic focus refresh.
+- Source files, attachment types, memory data and permission scopes are preserved; preview data is never written into source records.
+
 ## 0.2.0（文档关联与任务记忆）
 
 - 重要规则与业务知识保存为完整主题文档，记忆只保留短摘要、“何时读取”和稳定关联。

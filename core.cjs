@@ -64,7 +64,7 @@ function recordPath(entry) {
 }
 function indexPath(section) { return `${sectionRoot(section)}/index.json`; }
 function encode(entry) {
-  const { content = '', revision, path, section, documentLink, ...meta } = entry;
+  const { content = '', revision, path, section, documentLink, htmlPreview, ...meta } = entry;
   return `---\n${JSON.stringify(meta, null, 2)}\n---\n${content}`;
 }
 function decode(raw, path) {
@@ -133,7 +133,7 @@ function decode(raw, path) {
   return { ...meta, content, path, section: sectionForEntry(meta), revision: hash(raw) };
 }
 function summarize(entry) {
-  const { content, files, ...meta } = entry;
+  const { content, files, htmlPreview, ...meta } = entry;
   return meta;
 }
 function normalize(input, previous) {

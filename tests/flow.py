@@ -14,6 +14,8 @@ def pick(page, name, value):
     page.locator(f'.popover [role="option"][data-value="{value}"]').click()
 
 def saved_change(page, name, value):
+    if page.locator('.note-reader').count():
+        page.get_by_role('button', name='Edit record', exact=True).click()
     def matches(response):
         if not response.url.endswith('/call'):
             return False
@@ -78,7 +80,7 @@ with sync_playwright() as p:
         page.reload(wait_until='networkidle')
         expect(page.locator('.record').filter(has_text='Refund acceptance rule')).to_be_visible()
         page.locator('.record').filter(has_text='Refund acceptance rule').click()
-        expect(page.locator('[name=\"content\"]')).to_have_value(re.compile('Keep an audit record\\.'))
+        expect(page.locator('.note-reader .article')).to_contain_text('Keep an audit record.')
         # Confirm a full rule and associate its short summary through the UI.
         page.locator('.document-memory-editor > summary').click()
         page.locator('[name="memorySummary"]').fill('Keep an audit record for refunds.')
@@ -116,16 +118,17 @@ with sync_playwright() as p:
         page.locator('header .section-tab').filter(has_text='Memory').click()
         page.locator('.record').filter(has_text='Refund acceptance rule').click()
         expect(page.locator('.document-memory-card')).to_contain_text('Summary matches the current document')
-        expect(page.locator('[name="content"]')).to_have_attribute('readonly', '')
+        expect(page.locator('.note-reader .article')).to_contain_text('Keep an audit record for refunds.')
+        expect(page.get_by_role('button', name='Edit record', exact=True)).to_have_count(0)
         page.get_by_role('button', name='Read current document', exact=True).click()
-        expect(page.locator('[name="content"]')).to_have_value(re.compile('Keep an audit record'))
+        expect(page.locator('.note-reader .article')).to_contain_text('Keep an audit record')
         saved_change(page, 'content', '# Refund rule\n\nVerify receipt before refunding.')
         page.locator('header .section-tab').filter(has_text='Memory').click()
         page.locator('.record').filter(has_text='Refund acceptance rule').click()
         expect(page.locator('.document-memory-card')).to_contain_text('The document changed')
-        expect(page.locator('[name="content"]')).to_be_hidden()
+        expect(page.locator('.note-reader .article')).to_have_count(0)
         page.get_by_role('button', name='Read current document', exact=True).click()
-        expect(page.locator('[name="content"]')).to_have_value(re.compile('Verify receipt'))
+        expect(page.locator('.note-reader .article')).to_contain_text('Verify receipt')
         page.locator('.document-memory-editor > summary').click()
         page.locator('[name="memorySummary"]').fill('Verify receipt before refunding.')
         page.locator('[name="readWhen"]').fill('When implementing refunds')

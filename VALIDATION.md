@@ -1,5 +1,19 @@
 # 功能验证与测试验收报告（VALIDATION）
 
+## 0.2.1 release validation
+
+- Based on published source `144b62f`, implemented in the dedicated `fix/wiki-html-preview` worktree. No user files or running installation were changed.
+- The previous raw-HTML read path and the missing Markdown read-only view were reproduced before implementation. HTML service regressions cover discovery, warm-cache compatibility, managed attachments, local resources, traversal/remote rejection, incomplete reads, limits, derived metadata and workspace changes.
+- `node --test html-preview.test.cjs service.test.cjs document-memory.test.cjs memory-retrieval.test.cjs extension.test.mjs`: 113 passed, zero failures or skips.
+- `tests/markdown-flow.py`: real panel/service/filesystem acceptance passed for ordinary and managed Markdown, formatting, safe HTML/URL handling, no remote image requests, no source rewrite on read, editing/autosave/read/reload, inputs during a held save or snapshot, revision-conflict draft retention, distinct light/dark colors and responsive table/code overflow. The new read-view test failed on the original implementation.
+- `tests/html-flow.py`: real browser acceptance passed for visible HTML, local CSS/JS/image decoding, buttons, source reload, imported attachments, missing-resource and limit notices, parent/network isolation, responsive layout and selection after iframe interaction.
+- Existing `tests/flow.py`, standalone CDP renderer acceptance and real TrustedExtensionRunner fixture passed. They cover memory association drafts across refresh/editing, partial link retries, source navigation, stale summary withholding, scoped candidate confirmation/withdrawal and project/session guards.
+- Thirty JavaScript syntax checks, Python/Shell syntax, documentation links and diff whitespace passed. The official i18n gate reported zero failures and four pre-existing brand-title reviews. Light and dark reading screenshots were inspected.
+- The final local release package contains 30 files and 332261 bytes. Runtime imports, byte-for-byte source parity, bundled lexer/license integrity and private-path checks passed. Host UI declarations, permission list and filesystem scope match 0.2.0.
+- Local release-package SHA-256: `02adf274b49d7cd25e807be1f5e1bd618a3aaa5a30bfe78a8ff7e395734813fd`. The plugin center rebuilds the manifest, so the published artifact is verified separately.
+- A real native Host in a temporary profile upgraded the published 0.2.0 package to this candidate. The Markdown reader/lexer, HTML preview and license were present; there was no permission difference and plugin data was preserved.
+- Release preparation follows the completed candidate acceptance above. Source is committed and pushed before submission; actual marketplace publication and online-artifact checks are recorded separately after platform readback. No paid model, new dependency environment or `verify:ui:*` command was used. Source HTML stays literal in Markdown, implicit remote image requests remain inactive, and the existing HTML sandbox limits remain.
+
 ## 0.2.0 文档关联与任务记忆发布验证
 
 - 基准：已发布 `0.1.1` 的源码 `ebef0f8`，独立分支 `feat/document-memory-links`。下列为发布前源码与安装包验收，不代表运行中的插件已被替换。

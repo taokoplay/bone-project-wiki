@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "bone.project-wiki",
   "name": "BoneProjectWiki",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "A general user-owned project knowledge base with automatic agent memory, Obsidian-style tree explorer and multi-format asset management.",
   "author": "taokoplay",
   "homepage": "https://github.com/taokoplay/bone-project-wiki",

@@ -7,11 +7,17 @@ trap 'rm -rf "$stage"' EXIT
 cp "$root/manifest.json" "$root/main.js" "$root/core.cjs" "$root/service.cjs" "$root/extension.mjs" "$root/README.md" "$root/CHANGELOG.md" "$stage/"
 cp "$root/document-links.cjs" "$root/document-memory.cjs" "$root/memory-policy.cjs" "$root/memory-context.mjs" "$stage/"
 cp "$root/memory-selection.cjs" "$root/memory-presentation.cjs" "$stage/"
+cp "$root/html-preview.cjs" "$stage/"
+cp "$root/THIRD_PARTY_LICENSES.md" "$stage/"
 mkdir -p "$stage/renderer"
 cp "$root/renderer/index.html" "$root/renderer/styles.css" "$root/renderer/host-tokens.css" "$root/renderer/app.mjs" "$root/renderer/content.mjs" "$root/renderer/controls.mjs" "$root/renderer/i18n.mjs" "$stage/renderer/"
 cp "$root/renderer/document-memory.mjs" "$stage/renderer/"
 cp "$root/renderer/memory-fields.mjs" "$stage/renderer/"
+cp "$root/renderer/html-preview.mjs" "$stage/renderer/"
+cp "$root/renderer/markdown.mjs" "$root/renderer/marked.mjs" "$root/renderer/note-reader.mjs" "$stage/renderer/"
 cp -R "$root/skills" "$stage/skills"
+mkdir -p "$stage/docs"
+cp "$root/docs/markdown-view.md" "$stage/docs/"
 cli="${PI_PLUGIN_CLI:-}"
 if [ -z "$cli" ]; then
   if command -v pi-plugin >/dev/null 2>&1; then

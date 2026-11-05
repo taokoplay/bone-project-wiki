@@ -3,6 +3,7 @@ const { ROOT, KNOWLEDGE_ROOT, MEMORY_ROOT, DEVELOPMENT_ROOT, SECTIONS, isKnowled
 const { DocumentMemories } = require('./document-memory.cjs');
 const { stableRecordId, validRecordId } = require('./document-links.cjs');
 const { normalizeScopePaths } = require('./memory-selection.cjs');
+const { HtmlPreviews } = require('./html-preview.cjs');
 const escapeHtml = value => String(value).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const notFound = error => {
   const code = String(error?.code ?? error?.errorCode ?? '');
@@ -23,7 +24,7 @@ const RACY_WINDOW_MS = 2000;
 const META_FIELDS = ['schemaVersion','id','recordId','documentRef','documentLink','scopePaths','importance','title','category','kind','status','tags','topics','source','createdAt','updatedAt','path','revision','section'];
 const publicMeta = source => META_FIELDS.reduce((meta, key) => { if (source[key] !== undefined) meta[key] = source[key]; return meta; }, {});
 class WikiService {
-  constructor(pi) { this.pi = pi; this.queue = Promise.resolve(); this.disposed = false; this.racyWindowMs = RACY_WINDOW_MS; this.listPage = LIST_PAGE; this.documentMemories = new DocumentMemories(this); }
+  constructor(pi) { this.pi = pi; this.queue = Promise.resolve(); this.disposed = false; this.racyWindowMs = RACY_WINDOW_MS; this.listPage = LIST_PAGE; this.documentMemories = new DocumentMemories(this); this.htmlPreviews = new HtmlPreviews(this); }
   dispose() { this.disposed = true; }
   async workspace(expected) {
     if (this.disposed) throw new Error('PLUGIN_UNLOADED');
@@ -198,7 +199,7 @@ class WikiService {
   async loadRecord(meta, workspacePath) {
     if (meta.path.endsWith('.md')) {
       const entry = decode(await this.readFile(meta.path, workspacePath), meta.path);
-      return this.documentMemories.resolve(entry, workspacePath);
+      return this.htmlPreviews.attach(await this.documentMemories.resolve(entry, workspacePath), workspacePath);
     }
     const fileName = meta.path.split('/').at(-1);
     let previewDataUrl = '';
@@ -209,11 +210,11 @@ class WikiService {
         else if (preview && typeof preview.dataUrl === 'string') previewDataUrl = preview.dataUrl;
       } catch {}
     }
-    return {
+    return this.htmlPreviews.attach({
       ...meta,
       content: '',
       files: [{ path: fileName, size: meta.size, dataUrl: previewDataUrl }]
-    };
+    }, workspacePath);
   }
   async snapshot() {
     const workspace = await this.workspace();

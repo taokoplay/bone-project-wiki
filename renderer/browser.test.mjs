@@ -146,7 +146,9 @@ try {
   await wait(`fixture.calls.some(call => call.action === 'search') && document.querySelector('.records').textContent.includes('No matching records')`);
   await evaluate(`{ const search = document.querySelector('input[type="search"]'); search.value = ''; search.dispatchEvent(new Event('input')); }`);
   await wait(`document.querySelector('.record')`);
-  await evaluate(`document.querySelector('.record').click()`); await wait(`document.querySelector('.detail input[name=\"title\"]')`);
+  await evaluate(`document.querySelector('.record').click()`); await wait(`document.querySelector('.note-reader')`);
+  assert.equal(await evaluate(`document.querySelector('.note-editor') === null`), true);
+  await click('Edit record'); await wait(`document.querySelector('.detail input[name="title"]')`);
   await evaluate('fixture.failSave = true'); await fill('content', 'Retain this draft'); await wait(`document.body.textContent.includes('Revision conflict')`);
   assert.equal(await evaluate(`document.querySelector('[name="content"]').value`), 'Retain this draft');
   await evaluate(`fixture.data.workspacePath = '/demo/b'; fixture.listeners['workspace:changed']()`);

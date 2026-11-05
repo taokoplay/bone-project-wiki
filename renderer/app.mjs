@@ -1,8 +1,10 @@
 import { t, setLocale, errorText } from './i18n.mjs';
-import { markdown, buildPrototype, safeImage, collectFiles } from './content.mjs';
+import { safeImage, collectFiles } from './content.mjs';
 import { createSelect, closeAnyControl, showContextMenu } from './controls.mjs';
-import { linkedDocumentCard, rememberDocumentForm } from './document-memory.mjs';
+import { rememberDocumentForm } from './document-memory.mjs';
 import { memoryFields } from './memory-fields.mjs';
+import { htmlPreview } from './html-preview.mjs';
+import { noteReader } from './note-reader.mjs';
 
 const bridge = window.pluginBridge;
 const app = document.querySelector('#app');
@@ -193,7 +195,7 @@ function renderShell() {
   newBtn.innerHTML = '<svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><line x1=\"12\" y1=\"5\" x2=\"12\" y2=\"19\"></line><line x1=\"5\" y1=\"12\" x2=\"19\" y2=\"12\"></line></svg>';
   newBtn.addEventListener('click', () => {
     if (leave()) {
-      state.entry = null;
+      state.view++; state.mode = 'edit'; state.entry = null;
       renderDetail();
       detail.querySelector('[name=\"title\"]')?.focus();
     }
@@ -450,17 +452,39 @@ function renderDetail() {
     }), true))); lock(); return;
   }
   if (!state.entry || ['document', 'memory', 'handoff'].includes(state.entry.kind)) {
-    renderNoteEditor(state.entry);
+    if (!state.entry || (state.mode === 'edit' && !state.entry.documentRef)) {
+      state.mode = 'edit'; renderNoteEditor(state.entry);
+    } else {
+      const entry = state.entry;
+      detail.replaceChildren(noteReader(entry, t, {
+        onEdit: () => {
+          if (state.busy || state.stale) return;
+          state.view++; state.mode = 'edit'; renderDetail();
+          detail.querySelector('[name="content"]')?.focus();
+        },
+        onOpenSource: id => {
+          if (!leave()) return;
+          state.section = 'knowledge'; state.category = ''; state.query = ''; state.results = null;
+          renderShell(); renderList(); void openRecord({ recordId: id, section: 'knowledge' });
+        },
+        onForget: () => forgetMemory(entry)
+      }));
+      appendDocumentMemory(entry); lock();
+    }
     return;
   }
   const entry = state.entry; detail.replaceChildren();
   const article = element('article');
   article.append(element('div', t(entry.category === 'development' ? 'projectMemory' : entry.category), 'section-label'), element('h2', entry.title));
-  if (entry.kind === 'prototype') {
-    article.append(element('p', t('limitations'), 'hint'));
-    try {
-      const frame = element('iframe', undefined, 'preview'); frame.title = entry.title; frame.setAttribute('sandbox', 'allow-scripts'); frame.setAttribute('referrerpolicy', 'no-referrer'); frame.srcdoc = buildPrototype(entry); article.append(frame);
-    } catch (error) { article.append(element('p', error.message, 'hint')); }
+  if (entry.kind === 'prototype' || entry.htmlPreview) {
+    article.className = 'html-preview-detail';
+    article.append(htmlPreview(entry.htmlPreview || entry, entry.title, t));
+    if (entry.htmlPreview) {
+      const actions = element('div', undefined, 'file-actions');
+      actions.append(button('openInSystem', () => { void request('openDefault', { path: entry.path }).catch(problem); }),
+        button('revealInFinder', () => { void executeReveal(entry.path); }));
+      article.append(actions);
+    }
   } else if (entry.kind === 'image') {
     let hasPreview = false;
     for (const file of entry.files || []) {
@@ -673,38 +697,31 @@ function renderNoteEditor(entry) {
   const editorEpoch = state.epoch, editorView = state.view;
   const titleInput = element('input', undefined, 'note-title-input');
   titleInput.type = 'text'; titleInput.name = 'title'; titleInput.placeholder = t('title'); titleInput.value = entry?.title || '';
+  titleInput.setAttribute('aria-label', t('title'));
   const divider = element('div', undefined, 'note-title-divider');
   const contentInput = element('textarea', undefined, 'note-content-input');
   contentInput.name = 'content'; contentInput.placeholder = t('content'); contentInput.value = entry?.content || '';
+  contentInput.setAttribute('aria-label', t('content'));
   if (state.stale) { titleInput.readOnly = true; contentInput.readOnly = true; }
   const submitBtn = mutation(element('button', undefined)); submitBtn.type = 'submit'; submitBtn.style.display = 'none'; submitBtn.setAttribute('aria-hidden', 'true');
   form.append(titleInput, divider, contentInput, submitBtn);
   if (entry?.kind === 'memory') {
     const memoryBar = element('div', undefined, 'memory-bar');
-    memoryBar.append(mutation(button('forget', () => {
-      if (!window.confirm(t('forgetConfirm'))) return;
-      perform(async epoch => {
-        await request('forget', { id: entry.id, expectedRevision: entry.revision }, epoch);
-        state.entry = null;
-        await updateSnapshot(epoch);
-        renderDetail();
-        message(t('deleted'));
-      });
-    })));
+    memoryBar.append(mutation(button('forget', () => forgetMemory(entry))));
     form.append(memoryBar);
   }
-  if (entry?.documentRef) {
-    titleInput.readOnly = true; contentInput.readOnly = true;
-    form.insertBefore(linkedDocumentCard(entry, t, id => {
-      if (!leave()) return;
-      state.section = 'knowledge'; state.category = ''; state.query = ''; state.results = null;
-      renderShell(); renderList(); void openRecord({ recordId: id, section: 'knowledge' });
-    }), contentInput);
-    contentInput.hidden = entry.documentLink?.state !== 'current';
-    form.addEventListener('submit', event => event.preventDefault());
-    detail.append(form); lock(); return;
-  }
-  let editVersion = 0, saving = false;
+  let editVersion = 0, saving = false, readAfterSave = false;
+  const modeBar = element('div', undefined, 'note-mode-bar');
+  const readButton = mutation(button('readMode', () => {
+    if (state.stale || state.busy || !form.isConnected) return;
+    if (state.dirty || saving) {
+      readAfterSave = true; readButton.textContent = t('working');
+      clearTimeout(autoSaveTimer); void performSave();
+    } else { state.view++; state.mode = 'read'; renderDetail(); }
+  }));
+  modeBar.append(element('span', t('editMode'), 'note-mode-label'));
+  if (entry) modeBar.append(readButton);
+  form.prepend(modeBar);
   const settings = entry?.kind === 'memory' || (!entry && state.section === 'memory') ? memoryFields(t, entry || {}, { confirmation: true }) : null;
   if (settings) {
     form.insertBefore(settings.element, submitBtn);
@@ -742,12 +759,15 @@ function renderNoteEditor(entry) {
       if (editorView !== state.view || !form.isConnected) return;
       state.entry = saved;
       if (editVersion !== version) { saveAgain = true; return; }
-      const rendered = await updateSnapshot(epoch, () => editVersion === version && editorView === state.view && form.isConnected);
+      const rendered = await updateSnapshot(epoch, () => editVersion === version && editorView === state.view && form.isConnected, () => {
+        state.dirty = false;
+        if (readAfterSave) state.mode = 'read';
+      });
       if (!rendered) { saveAgain = editVersion !== version; return; }
-      state.dirty = false;
       message(t('saved'));
     } catch (err) {
-      message(errorText(err), true);
+      readAfterSave = false; readButton.textContent = t('readMode');
+      if (active(editorEpoch) && editorView === state.view && form.isConnected) message(errorText(err), true);
     } finally {
       saving = false;
       if (saveAgain) void performSave();
@@ -767,6 +787,20 @@ function renderNoteEditor(entry) {
     performSave();
   });
   detail.append(form);
+  appendDocumentMemory(entry);
+  lock();
+}
+function forgetMemory(entry) {
+  if (!window.confirm(t('forgetConfirm'))) return;
+  void perform(async epoch => {
+    await request('forget', { id: entry.id, expectedRevision: entry.revision }, epoch);
+    state.entry = null;
+    await updateSnapshot(epoch);
+    message(t('deleted'));
+  });
+}
+function appendDocumentMemory(entry) {
+  const editorEpoch = state.epoch, editorView = state.view;
   if (entry?.kind === 'document' && entry.status !== 'archived') {
     const workspacePath = state.snapshot.workspacePath;
     const draft = state.memoryDraft?.workspacePath === workspacePath && state.memoryDraft.recordId === entry.recordId ? state.memoryDraft : null;
@@ -799,12 +833,13 @@ async function openRecord(selector) {
   try { const entry = await request('read', payload, epoch); if (view !== state.view) return; state.entry = entry; renderList(); renderDetail(); }
   catch (error) { if (active(epoch) && view === state.view) { empty(detail, 'error', 'retry', button('retry', () => openRecord(selector))); problem(error); } }
 }
-async function updateSnapshot(epoch, isCurrent = () => true) {
+async function updateSnapshot(epoch, isCurrent = () => true, beforeRender = () => {}) {
   const snapshot = await request('snapshot', {}, epoch);
   if (!isCurrent()) return false;
   if (snapshot.workspacePath !== state.snapshot?.workspacePath) {
     state.memoryDraft = null; state.entry = null; state.dirty = false; state.view++;
   }
+  else beforeRender();
   state.snapshot = snapshot;
   state.results = null; state.query = ''; state.search++;
   renderShell(); renderList(); renderDetail();
@@ -1120,13 +1155,18 @@ function setupDragAndDrop() {
     const items = await extractDropEntries(event.dataTransfer);
     if (items.length) await handleDroppedItems(items);
   });
+  let previewFocused = false;
+  window.addEventListener('blur', () => {
+    previewFocused = document.hasFocus() && document.activeElement?.matches('iframe.preview');
+  });
   window.addEventListener('focus', () => {
+    if (previewFocused) { previewFocused = false; return; }
     if (!state.dirty && !state.busy && state.snapshot?.initialized) {
       refresh();
     }
   });
 }
-window.wikiUi = { handleDroppedFiles, preferences, importView, context, exportHtml, editRecord: entry => { state.view++; state.entry = entry || null; renderDetail(); }, refresh };
+window.wikiUi = { handleDroppedFiles, preferences, importView, context, exportHtml, editRecord: entry => { state.view++; state.mode = 'edit'; state.entry = entry || null; renderDetail(); }, refresh };
 async function start() {
   setupDragAndDrop();
   renderShell(); empty(detail, 'loading', 'pending');
