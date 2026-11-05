@@ -1,5 +1,13 @@
 # 更新日志（CHANGELOG）
 
+## 0.2.2 (full-pane HTML and first-click selection)
+
+- HTML documents, imported attachments and prototypes fill the right content pane, following the available width and height without outer card padding, borders or rounded corners.
+- File actions and preview limitations are available in a compact floating disclosure instead of taking space above and below the webpage. Escape closes the disclosure.
+- Long documents scroll inside the webpage. Missing-resource and preview-error notices remain visible; switching to Markdown restores normal document spacing.
+- Fix first file clicks lost when panel activation rebuilt the file tree. Automatic synchronization now preserves pointer targets, current selection, editor state and unfinished memory-summary input.
+- Late synchronization results are ignored after newer input, navigation, project changes or panel disposal. External file changes still synchronize on activation, and explicit refresh remains available.
+
 ## 0.2.1 (HTML preview and Markdown reading)
 
 - Markdown documents now open in a formatted read-only view, with explicit source editing and automatic saving. New records start in editing mode.

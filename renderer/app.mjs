@@ -5,6 +5,7 @@ import { rememberDocumentForm } from './document-memory.mjs';
 import { memoryFields } from './memory-fields.mjs';
 import { htmlPreview } from './html-preview.mjs';
 import { noteReader } from './note-reader.mjs';
+import { watchFocusRefresh } from './focus-refresh.mjs';
 
 const bridge = window.pluginBridge;
 const app = document.querySelector('#app');
@@ -473,19 +474,19 @@ function renderDetail() {
     }
     return;
   }
-  const entry = state.entry; detail.replaceChildren();
+  const entry = state.entry;
+  if (entry.kind === 'prototype' || entry.htmlPreview) {
+    const actions = entry.htmlPreview ? [
+      button('openInSystem', () => { void request('openDefault', { path: entry.path }).catch(problem); }),
+      button('revealInFinder', () => { void executeReveal(entry.path); })
+    ] : [];
+    detail.replaceChildren(htmlPreview(entry.htmlPreview || entry, entry.title, t, actions));
+    return;
+  }
+  detail.replaceChildren();
   const article = element('article');
   article.append(element('div', t(entry.category === 'development' ? 'projectMemory' : entry.category), 'section-label'), element('h2', entry.title));
-  if (entry.kind === 'prototype' || entry.htmlPreview) {
-    article.className = 'html-preview-detail';
-    article.append(htmlPreview(entry.htmlPreview || entry, entry.title, t));
-    if (entry.htmlPreview) {
-      const actions = element('div', undefined, 'file-actions');
-      actions.append(button('openInSystem', () => { void request('openDefault', { path: entry.path }).catch(problem); }),
-        button('revealInFinder', () => { void executeReveal(entry.path); }));
-      article.append(actions);
-    }
-  } else if (entry.kind === 'image') {
+  if (entry.kind === 'image') {
     let hasPreview = false;
     for (const file of entry.files || []) {
       if (file.dataUrl && safeImage(file.dataUrl)) {
@@ -828,7 +829,7 @@ function appendDocumentMemory(entry) {
 }
 async function openRecord(selector) {
   const payload = typeof selector === 'string' ? { id: selector } : selector;
-  const view = ++state.view, epoch = state.epoch; state.mode = 'read';
+  const view = ++state.view, epoch = state.epoch; state.mode = 'read'; state.entry = null;
   empty(detail, 'loading', 'pending');
   try { const entry = await request('read', payload, epoch); if (view !== state.view) return; state.entry = entry; renderList(); renderDetail(); }
   catch (error) { if (active(epoch) && view === state.view) { empty(detail, 'error', 'retry', button('retry', () => openRecord(selector))); problem(error); } }
@@ -1155,20 +1156,18 @@ function setupDragAndDrop() {
     const items = await extractDropEntries(event.dataTransfer);
     if (items.length) await handleDroppedItems(items);
   });
-  let previewFocused = false;
-  window.addEventListener('blur', () => {
-    previewFocused = document.hasFocus() && document.activeElement?.matches('iframe.preview');
-  });
-  window.addEventListener('focus', () => {
-    if (previewFocused) { previewFocused = false; return; }
-    if (!state.dirty && !state.busy && state.snapshot?.initialized) {
-      refresh();
-    }
-  });
 }
 window.wikiUi = { handleDroppedFiles, preferences, importView, context, exportHtml, editRecord: entry => { state.view++; state.mode = 'edit'; state.entry = entry || null; renderDetail(); }, refresh };
 async function start() {
   setupDragAndDrop();
+  watchFocusRefresh({ state, request, onWorkspaceChanged: workspaceChanged, onError: problem,
+    onSnapshot: (snapshot, entry) => {
+      state.snapshot = snapshot;
+      if (entry !== undefined) state.entry = entry;
+      if (state.results === null) renderList();
+      if (entry !== undefined) renderDetail();
+    }
+  });
   renderShell(); empty(detail, 'loading', 'pending');
   if (bridge) {
     try { setLocale(await bridge.invoke('app.getLocale')); } catch (error) { console.error('Locale lookup failed', error); }

@@ -1,5 +1,18 @@
 # 功能验证与测试验收报告（VALIDATION）
 
+## 0.2.2 release validation: full-pane HTML and first-click selection
+
+- Based on published source `0fd0e6d`, isolated in `fix/wiki-full-width-html`. No user-owned document or running installation was changed.
+- A real browser baseline failed before implementation: the HTML frame had 40 px margins on both sides, about 139 px above and 108 px below, plus a 1 px border and 10 px radius.
+- `tests/html-flow.py` passes after the fix for raw HTML, managed attachments and prototypes. All four frame edges match the right pane within 1 px at desktop, narrow and short sizes. It also verifies internal wheel scrolling and footer interaction, compact keyboard/file actions, source refresh, missing-resource and limit notices, isolation and restored Markdown read/edit spacing.
+- The headless Chrome fixture leaves room around the emulated viewport in its native window. A reduced reproduction proved that native edge clipping caused footer input to hit the owner iframe; enlarging only the native window made the same click reach the unchanged page. No application sandbox or permission setting was weakened.
+- The first-click regression was reproduced with a physical mouse press, activation snapshot, then release: the previous destructive refresh removed the target and failed to open the file. `tests/focus-flow.py` now passes one-click opening, focus during a held read, late snapshots after navigation, unchanged reader/editor retention, external file updates and input during synchronization.
+- `node --test renderer/focus-refresh.test.mjs html-preview.test.cjs service.test.cjs document-memory.test.cjs memory-retrieval.test.cjs extension.test.mjs`: 118 passed, zero failures or skips. Focus-sync regressions cover response ordering, project isolation, pointer/input guards, internal iframe focus, disposal and error reporting. Standalone CDP, full HTML, Markdown and memory flows passed against the combined candidate.
+- The i18n gate reports zero failures and the same four pre-existing brand-title reviews. Loading, storage, Markdown and sandbox contracts are preserved; activation sync now updates in the background and keeps explicit reload separate.
+- The final local release package contains 31 files and 339675 bytes, SHA-256 `dd18172f646b4f4943094a4ec061fe8953f2167cffb92817a3786b53dbc73b43`. Archive/source parity, runtime imports, private-path scans and unchanged host declarations passed. The marketplace rebuilds the manifest, so its published artifact is verified separately.
+- A native host in a temporary profile upgraded published 0.2.1 to this combined 0.2.2 candidate. Plugin data was preserved, both preview and focus-sync modules were present and the permission difference was empty. The earlier preview-only candidate hash is superseded.
+- The full-pane screenshot was inspected. Thirty-two JavaScript checks, Python/Shell syntax, documentation links and diff whitespace passed. No `verify:ui:*` command, paid model or dependency installation was used. Source is committed and pushed before marketplace submission; actual publication and online package verification are recorded separately after platform readback. The running user installation remains untouched.
+
 ## 0.2.1 release validation
 
 - Based on published source `144b62f`, implemented in the dedicated `fix/wiki-html-preview` worktree. No user files or running installation were changed.

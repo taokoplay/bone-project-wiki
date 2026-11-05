@@ -13,7 +13,7 @@
   - **表格**：Excel 电子表格（`.xlsx`, `.xls`, `.csv`）、WPS 表格（`.et`, `.ett`）。
   - **演示**：PowerPoint（`.pptx`, `.ppt`）、WPS 演示（`.dps`, `.dpt`）、Keynote（`.key`）。
   - **多媒体**：图片（`.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`, `.svg`）、音频（`.mp3`, `.wav`, `.m4a`, `.ogg`, `.flac`）与视频（`.mp4`, `.webm`, `.mov`），内嵌原生播放与大图预览。
-- **外部目录实时同步**：支持直接从操作系统访达（Finder）或文件资源管理器将文件/多层文件夹直接拖入或拷入，窗口聚焦自动静默同步。
+- **External file synchronization**: activating the panel checks external changes in the background without replacing an active click target or clearing the current selection. Editing and unfinished memory-summary input remain intact. Use the tree refresh button for an explicit reload.
 - **扁平化矢量图标**：全套采用精致单色 1px 细线矢量 SVG 图标，自动适配亮色与暗色模式。
 - **Agent 协作记忆层**：在轮次结算后保存用户明确表达的具体偏好与事实；需要结合上文的记忆请求由 Agent 提炼后通过工具保存，下一轮以有篇幅限制的摘要与全文路径提供参考。
 
@@ -31,7 +31,7 @@
 3. **打开与查看各类资产**：
    - Markdown notes display formatted headings, emphasis, nested lists, quotes, tables, code and task lists. Read/edit switching preserves revision checks, pending input and conflict drafts. Linked memory summaries remain read-only;
    - 图片自适应大图查看；音频与视频直接在右侧面板内嵌原生控件播放；
-   - HTML/HTM 文件在面板内展示网页，支持已有 HTML 附件以及直接拷入知识目录的文件，无需重新导入为原型；
+   - HTML/HTM files, existing HTML attachments and prototypes fill the right pane. The page follows its available width and height and scrolls internally; file actions and preview information are available from the small floating menu, without a surrounding card or repeated file heading;
    - 页面可使用内联样式、普通脚本及目录内引用的 CSS/JS 和 PNG/JPEG/WEBP/GIF 图片。预览为隔离环境，远程请求、模块脚本、子页面嵌入、表单提交和弹窗仍不支持；
    - 预览最多读取 100 个文件、合计 10 MB；缺失资源或无法读取会提示，并保留系统浏览器打开入口。原文件不会被转换或覆盖；
    - Word、WPS、Excel、PDF 等办公文档提供一键“在系统中打开”与“在访达中定位”。

@@ -9,10 +9,12 @@ async function main() {
   const root = await fs.mkdtemp(path.join(process.env.PI_SCRATCH_DIR || os.tmpdir(),'bone-wiki-flow-'));
   let settings = {};
   let failMemory = false;
+  const hostActions = [];
   const service = new WikiService({
     workspace:{get:async()=>({path:root,name:'BoneProjectWiki acceptance'})},
     plugin:{getSettings:async()=>settings,setSettings:async patch=>{settings={...settings,...patch};}},
     fs:{
+      openDefault: async p => { hostActions.push({ action: 'openDefault', path: p }); return { opened: true }; },
       readText:p=>fs.readFile(path.join(root,p),'utf8'),
       writeText:async(p,data)=>{if(failMemory && p.startsWith('.bone-project-wiki/memory/') && p.endsWith('.md'))throw new Error('Test memory write failure');const target=path.join(root,p);await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,data);},
       remove:p=>fs.unlink(path.join(root,p)),
@@ -51,13 +53,15 @@ async function main() {
       if(route==='/test/html-fixture' && req.method==='POST'){
         const directory=path.join(root,'.bone-project-wiki/knowledge/产品设计');
         await fs.mkdir(path.join(directory,'assets'),{recursive:true});
-        const source='<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="assets/style.css"></head><body><h1>完整产品与交互文档</h1><button id="switch" onclick="this.textContent=\'已切换\'">切换页面</button><img alt="本地图片" src="assets/pixel.png"><script src="assets/app.js"></script><script>try{parent.document.body.dataset.previewEscaped="yes"}catch{};fetch("https://example.invalid/preview-network").catch(()=>{document.body.dataset.networkBlocked="yes"})</script></body></html>';
+        const source='<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="assets/style.css"></head><body><main><h1>完整产品与交互文档</h1><p>Full document surface with local styles and interactions.</p><button id="switch" onclick="this.textContent=\'已切换\'">切换页面</button><img alt="本地图片" src="assets/pixel.png"><div style="height:1600px"></div><button onclick="this.textContent=\'End reached\'">Page end</button></main><script src="assets/app.js"></script><script>try{parent.document.body.dataset.previewEscaped="yes"}catch{};fetch("https://example.invalid/preview-network").catch(()=>{document.body.dataset.networkBlocked="yes"})</script></body></html>';
         await fs.writeFile(path.join(directory,'完整产品与交互文档.html'),source);
-        await fs.writeFile(path.join(directory,'assets/style.css'),'h1{color:rgb(12, 80, 120)}');
+        await fs.writeFile(path.join(directory,'assets/style.css'),'body{margin:0;background:#172128;color:#e5edf1;font:16px/1.7 system-ui}main{padding:40px}h1{color:rgb(12, 80, 120);margin:0 0 16px}p{color:#b3c2cb}button{padding:10px 18px;border:1px solid #617986;background:#26353f;color:inherit;border-radius:6px}');
         await fs.writeFile(path.join(directory,'assets/app.js'),'document.body.dataset.localScript="loaded"');
         await fs.writeFile(path.join(directory,'assets/pixel.png'),Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS1sAAAAASUVORK5CYII=','base64'));
         await fs.writeFile(path.join(directory,'missing-assets.html'),'<h1>Readable partial page</h1><script src="missing.js"></script>');
         await service.request({action:'import',workspacePath:root,kind:'attachment',category:'产品设计',title:'Imported HTML attachment',files:[{path:'index.html',content:'<h1>Imported attachment preview</h1><button onclick="this.textContent=\'Worked\'">Try attachment</button>'}]});
+        await service.request({action:'import',workspacePath:root,kind:'prototype',category:'产品设计',title:'Full pane prototype',entryPath:'index.html',files:[{path:'index.html',content:'<h1>Full pane prototype page</h1>'}]});
+        await service.request({action:'save',workspacePath:root,kind:'document',category:'产品设计',title:'Layout check note',content:'# Markdown still has document spacing\n\nFormatted reading remains available.'});
         res.setHeader('Content-Type','application/json');res.end(JSON.stringify({created:true}));return;
       }
       if(route==='/call' && req.method==='POST'){
@@ -68,6 +72,7 @@ async function main() {
         if(channel==='app.getLocale')result='en';
         else if(channel==='app.getAppearance')result={base:'light',locale:'en'};
         else if(channel==='wiki')result=await service.request(input);
+        else if(channel==='fs.reveal'){hostActions.push({action:'reveal',path:input.path});result={revealed:true};}
         else throw new Error('UNSUPPORTED_CHANNEL');
         res.setHeader('Content-Type','application/json');res.end(JSON.stringify({result}));return;
       }
@@ -80,7 +85,7 @@ async function main() {
         const entries=[];
         const scanned=await service.scanAll(root);
         for(const section of ['knowledge','memory','development']) for(const meta of scanned[section].entries) entries.push(await service.loadRecord(meta,root));
-        res.setHeader('Content-Type','application/json');res.end(JSON.stringify({snapshot,entries}));return;
+        res.setHeader('Content-Type','application/json');res.end(JSON.stringify({snapshot,entries,hostActions}));return;
       }
       const name=path.basename(route)===''?'index.html':path.basename(route);
       if(!/\.(html|css|mjs)$/.test(name)) {res.writeHead(404);res.end();return;}

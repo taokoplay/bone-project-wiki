@@ -14,6 +14,7 @@ cp "$root/renderer/index.html" "$root/renderer/styles.css" "$root/renderer/host-
 cp "$root/renderer/document-memory.mjs" "$stage/renderer/"
 cp "$root/renderer/memory-fields.mjs" "$stage/renderer/"
 cp "$root/renderer/html-preview.mjs" "$stage/renderer/"
+cp "$root/renderer/focus-refresh.mjs" "$stage/renderer/"
 cp "$root/renderer/markdown.mjs" "$root/renderer/marked.mjs" "$root/renderer/note-reader.mjs" "$stage/renderer/"
 cp -R "$root/skills" "$stage/skills"
 mkdir -p "$stage/docs"

@@ -57,6 +57,8 @@ def menu(page, label):
 with sync_playwright() as p:
     browser = p.chromium.launch(channel='chrome', headless=True)
     page = browser.new_page(viewport={'width': 1280, 'height': 900})
+    page.set_default_timeout(5000)
+    page.set_default_navigation_timeout(10000)
     errors = []
     page.on('pageerror', lambda error: errors.append(str(error)))
     try:
