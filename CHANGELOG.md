@@ -1,5 +1,32 @@
 # 更新日志（CHANGELOG）
 
+## 0.3.4 (offline XLSX previews, save and latest-search performance)
+
+- Save and its full snapshot share one serialized operation. Verified bodies and scans are reused only within that operation; unchanged derived indexes are not rewritten. Final revision checks, target collision checks and write readback still use fresh bytes.
+- Ordinary autosave keeps the editor, focus, selection and current input. Tree updates use current record identities and revisions, preserve association drafts and defer moving a held pointer target until its click finishes.
+- Superseded panel searches leave the queue or stop at the next I/O boundary. Writes retain their FIFO position, independent clients and tool searches remain isolated, and older cancellation commands cannot cancel newer searches.
+- Saved records retain their actual revision when a later refresh fails, allowing a safe retry. Existing public save results and capability-free panels keep their compatible path.
+- Temporary local filesystem measurements: save plus snapshot body reads 414 to 212 for 200 documents and 1624 to 822 for 800 documents; index writes 3 to 1. The corresponding five-sample median durations were 56.80 to 36.08 ms and 154.58 to 93.16 ms. Timing is environment-specific.
+- Includes the offline XLSX preview/import fix and first-stage search/formatter improvements previously validated as local 0.3.2 and 0.3.3 candidates. No record migration or permission change is required.
+
+## 0.3.3 (first-stage performance milestone, included in 0.3.4)
+
+- XLSX 按工作簿复用有界数字格式器池，保留日期、百分比、金额、前导零及公式缓存的显示值；不缓存单元格值。
+- 搜索在同次请求内集中核验关联来源，避免按每条关联重复读取知识库；保留实际正文、重复身份、不可读及失效来源检查，不跨请求缓存事实。
+- 搜索不再生成图片或 HTML 等预览，查询评分、范围、摘录、排序和结果上限保持；显式打开沿用原预览路径。
+- 检索期间工作区切换会拒绝旧结果，保留现有数据格式、权限和草稿/自动保存保护。
+- 本地对照中，200/50/10 场景搜索正文读取 2250→250 次，800/80/20 场景 16880→880 次；10 万格式化单元格处理 2371→805 ms，完整值哈希一致。具体条件见性能说明。
+- This milestone inherited the 0.3.2 XLSX fix. Save/refresh work was completed in the following 0.3.4 stage; batched XML parsing remains deferred. Version 0.3.3 was a local validation candidate, not a separate public release.
+
+## 0.3.2 (XLSX preview milestone, included in 0.3.4)
+
+- 修复 xlsx 只显示附件卡片的问题，新增离线只读表格预览，支持工作表切换、分页、合并单元格、中文、前导零和基本数字/日期格式。
+- 修复拖入 xlsx 被图片专用校验拒绝的问题；只为 xlsx 附件增加明确的二进制格式支持，不扩大其他文件类型或权限。
+- 显示工作簿保存的公式结果，缺少结果时显示公式文本；不执行公式、外部链接或表格内容中的脚本，不改写源文件。
+- 对压缩文件、解压体积、XML 与可见数据量设限，校验目录、内容长度和 CRC；损坏、加密、超限及缺少宿主读取接口时明确提示。
+- 外置工作簿保留系统打开，导入附件提供原件下载。打开失败显示错误，旧文件的晚返回结果不会覆盖新选择；保留侧栏收起和既有文档流程。
+- This fix was validated as a local 0.3.2 candidate and is included in 0.3.4; it was not published as a separate version.
+
 ## 0.3.1（记忆总览与可收起侧栏）
 
 - 左上角新增收起/展开侧栏按钮，始终保留恢复入口；收起后正文占满内容区，窄窗口也不保留空白侧栏行。

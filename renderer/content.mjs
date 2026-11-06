@@ -79,13 +79,14 @@ export async function collectFiles(input) {
     const path = file.webkitRelativePath || file.name;
     if (seen.has(path)) throw new Error(`${t('duplicate')}: ${path}`);
     seen.add(path);
-    if (/\.(png|jpe?g|webp|gif)$/i.test(path)) {
+    if (/\.(png|jpe?g|webp|gif|xlsx)$/i.test(path)) {
       const dataUrl = await new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onerror = () => reject(new Error(`${t('error')}: ${path}`));
         reader.onload = () => resolve(reader.result);
         const extension = path.split('.').at(-1).toLowerCase();
-        reader.readAsDataURL(new Blob([file], { type: `image/${extension === 'jpg' ? 'jpeg' : extension}` }));
+        const type = extension === 'xlsx' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : `image/${extension === 'jpg' ? 'jpeg' : extension}`;
+        reader.readAsDataURL(new Blob([file], { type }));
       });
       result.push({ path, dataUrl });
     } else if (/\.(html?|css|m?js|txt|md|json|csv)$/i.test(path)) {

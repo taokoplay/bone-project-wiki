@@ -64,7 +64,7 @@ function recordPath(entry) {
 }
 function indexPath(section) { return `${sectionRoot(section)}/index.json`; }
 function encode(entry) {
-  const { content = '', revision, path, section, documentLink, htmlPreview, ...meta } = entry;
+  const { content = '', revision, path, section, documentLink, htmlPreview, spreadsheetPreview, ...meta } = entry;
   return `---\n${JSON.stringify(meta, null, 2)}\n---\n${content}`;
 }
 function decode(raw, path) {
@@ -133,7 +133,7 @@ function decode(raw, path) {
   return { ...meta, content, path, section: sectionForEntry(meta), revision: hash(raw) };
 }
 function summarize(entry) {
-  const { content, files, htmlPreview, ...meta } = entry;
+  const { content, files, htmlPreview, spreadsheetPreview, ...meta } = entry;
   return meta;
 }
 function normalize(input, previous) {
@@ -185,10 +185,14 @@ function validateFiles(files, kind, entryPath) {
       return { path, content: file.content };
     }
     if (typeof file.dataUrl === 'string' && file.content === undefined) {
-      const match = /^data:image\/(png|jpeg|webp|gif);base64,([A-Za-z0-9+/]*={0,2})$/.exec(file.dataUrl);
-      if (!match || !match[2] || match[2].length % 4) throw new Error('UNSUPPORTED_IMAGE');
-      const data = Buffer.from(match[2], 'base64');
-      if (data.toString('base64') !== match[2]) throw new Error('INVALID_IMAGE_ENCODING');
+      const spreadsheet = kind === 'attachment' && /\.xlsx$/i.test(path);
+      if (file.dataUrl.length > 14 * 1024 * 1024) throw new Error('BUNDLE_TOO_LARGE');
+      const match = spreadsheet
+        ? /^data:application\/(?:octet-stream|vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet);base64,([A-Za-z0-9+/]*={0,2})$/.exec(file.dataUrl)
+        : /^data:image\/(?:png|jpeg|webp|gif);base64,([A-Za-z0-9+/]*={0,2})$/.exec(file.dataUrl);
+      if (!match || !match[1] || match[1].length % 4) throw new Error(spreadsheet ? 'INVALID_SPREADSHEET_ENCODING' : 'UNSUPPORTED_IMAGE');
+      const data = Buffer.from(match[1], 'base64');
+      if (data.toString('base64') !== match[1]) throw new Error(spreadsheet ? 'INVALID_SPREADSHEET_ENCODING' : 'INVALID_IMAGE_ENCODING');
       bytes += data.length;
       return { path, dataUrl: file.dataUrl, sha256: hash(data) };
     }

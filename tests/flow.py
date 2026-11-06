@@ -30,13 +30,13 @@ def saved_change(page, name, value):
 def saved_setting(page, name, value, action):
     def matches(response):
         request = (response.request.post_data_json or {}).get('input', {}) if response.url.endswith('/call') else {}
-        return request.get('action') == 'save' and request.get(name) == value
-    def snapshot(response):
-        return response.url.endswith('/call') and (response.request.post_data_json or {}).get('input', {}).get('action') == 'snapshot'
-    with page.expect_response(matches) as response, page.expect_response(snapshot):
+        envelope = response.request.post_data_json or {} if response.url.endswith('/call') else {}
+        return envelope.get('channel') == 'wiki.save' and request.get('action') == 'save' and request.get(name) == value
+    with page.expect_response(matches) as response:
         action()
     body = response.value.json()
     assert response.value.ok and 'error' not in body, body
+    assert body['result']['snapshot']['requestCapabilities']['saveSnapshot'] is True, body
 
 def context_for(page, **fields):
     state = page.request.get(base + '/state').json()

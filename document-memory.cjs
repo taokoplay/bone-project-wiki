@@ -4,17 +4,17 @@ const { stableRecordId, documentContentHash, projectDocumentMemory } = require('
 const { usableMemory, memoryTitle } = require('./memory-policy.cjs');
 const { normalizeMemoryMetadata } = require('./memory-selection.cjs');
 const { unavailableMemory } = require('./memory-overview.cjs');
-const changedWorkspace = error => /WORKSPACE_CHANGED|PLUGIN_UNLOADED|LOCAL_PROJECT_REQUIRED/.test(String(error?.message || error));
+const {isInterrupted:changedWorkspace}=require('./operation-errors.cjs');
 class DocumentMemories {
   constructor(service) { this.service = service; }
-  async documents(recordIds, workspacePath, metadata) {
+  async documents(recordIds, workspacePath, metadata, readDocument) {
     const service = this.service;
     const rows = metadata || (await service.scan('knowledge', workspacePath)).rows;
     const documents = []; let unreadable = false;
     for (const meta of rows) {
       if (!meta.path.endsWith('.md')) continue;
       try {
-        const document = decode(await service.readFile(meta.path, workspacePath), meta.path);
+        const document = readDocument ? await readDocument(meta) : decode(await service.readFile(meta.path, workspacePath), meta.path);
         if (document.kind === 'document' && recordIds.has(stableRecordId(document))) documents.push(document);
       } catch (error) {
         if (changedWorkspace(error)) throw error;

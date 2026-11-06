@@ -1,5 +1,48 @@
 # 功能验证与测试验收报告（VALIDATION）
 
+## 0.3.4 publication preparation
+
+- The user authorized marketplace publication of `bone.project-wiki@0.3.4`. The account owns the plugin and is bound to `taokoplay/bone-project-wiki`; the version is available and no earlier version is waiting for review.
+- Publication preparation changes release documentation only. All executable files and host declarations must match the accepted 0.3.4 candidate, SHA-256 `9a5538e7a06f736cb399736c4b546339fdf2e7e4f1b3b73603800f224763458a`. The candidate and measurement records remain preserved separately.
+- Submit the complete host manifest fields and committed runtime files, with the pushed source commit as `sourceRef`. The platform rebuilds its manifest; the official artifact will be downloaded and verified independently. Acceptance or review approval is not proof of public publication.
+- The following sections record historical candidate validation. Public status, official bytes and upgrade verification are tracked in the separate publication delivery record. Running user installations are not used as test profiles.
+- Release-preparation package: 62 files, 514031 bytes, SHA-256 `7ce7546ace8aff6b5c16ae2e13334c32b73a5c1acfa04d5dd9f50dd0e0493a22`. Exact candidate executable/manifest parity passed; only README, changelog and two contract/performance documents differ. Source parity, private-path checks and documentation links passed.
+- The complete 232-test suite passed again, with no failures/skips/cancellations. The i18n gate reports zero failures and the same four existing brand-title reviews. Source submission includes 53 reviewed code, documentation and formal regression files; archives, logs and user data are excluded.
+
+## 0.3.4 stage-two save/search candidate
+
+- Isolated branch `perf/wiki-save-refresh-cancel`, based on the exact accepted local 0.3.3 archive. Its 193-test baseline passed. Current full Node suite: 232 passed, no failures/skips/cancellations; the 15 backend save/queue regressions also pass independently.
+- Real Chrome flows passed for save/search reconciliation, external files discovered by search, Markdown, linked-memory authoring, first-click/focus, sidebar, XLSX, HTML, memory overview and first-stage performance behavior. Standalone CDP and real extension-loader fixtures passed without model calls or a user instance.
+- One bounded review found an externally discovered search row could not open before a panel snapshot refresh. A real browser test reproduced the failure, then passed after current search metadata and retained row state were used. Save/rename/menu/association/pointer tests passed again after the fix. No review finding remains open.
+- Five-sample real-filesystem save/snapshot medians: 200/50/10 body reads 414 to 212, index writes 3 to 1, 56.80 to 36.08 ms; 800/80/20 reads 1624 to 822, writes 3 to 1, 154.58 to 93.16 ms. Superseded-search/write sequence total body reads: 954 to 455 and 3444 to 1685; old requests cancel and the write still precedes the latest search.
+- Two browser measurement series are retained, including a flat 200-document result. Final-code medians including the existing 350 ms debounce: 436.5 to 391.6 ms (200 documents), 1206.2 to 553.9 ms (800). Initial medians were 432.2 to 436.3 ms and 569.0 to 461.9 ms. Timing varies; all 20 candidate saves across both series kept editor/input identity, selection and focus.
+- 71 JavaScript files, 10 Python test files, Shell syntax, manifest JSON, relative documentation links and diff whitespace passed. The i18n gate has zero failures and four existing brand-title reviews. Early pointer-test failure and flow timeouts were not counted as passing; corrected synchronization and explicit query input passed their final runs.
+- Package: 62 uncompressed files, 513747 bytes, SHA-256 `9a5538e7a06f736cb399736c4b546339fdf2e7e4f1b3b73603800f224763458a`. Exact source parity, dependency closure, extracted imports and private-path checks passed. Native isolated official 0.3.1 to candidate 0.3.4 upgrade passed; all installed file hashes match, plugin data is preserved and the permission difference is empty.
+- Remote main refreshed to `621f104303c28d1fd321c4997afade4a8d6a49b1`, an ancestor of source baseline `5e3a4314ce4186d5ce940db69f11dd8d81c2130e`. Implementation remains uncommitted and is fixed by the package/file hashes. No publication, user-instance installation, dependency environment, paid API or `verify:ui:*` run. Cancellation is checkpoint-based, request-local reuse is not a filesystem transaction, and large-sheet batching remains deferred. No current acceptance blocker.
+
+## 0.3.3 首阶段性能优化候选
+
+- 独立分支 `perf/wiki-search-and-xlsx`；以 0.3.2 固定归档 `8363e9b...a53139d` 作为功能及性能基准，原候选、其他工作区和用户资料保留。范围为 XLSX 格式器复用及搜索批量核验/跳过预览，保存刷新和进一步分批解析未实施。
+- 基线 181 项 Node 测试通过。新增 12 项回归在旧实现有 9 项失败，实施后完整 193 项全部通过，无失败/跳过/取消。覆盖格式值/选项、独立工作簿、读取次数、来源新鲜度、相同元数据隐藏的身份冲突、不可读及归档来源、评分/摘录/范围、显式预览和工作区变化。
+- 新增真实 `tests/performance-flow.py` 通过 2000 个格式化值、单工作簿复用和重新打开新池，以及关联记忆搜索/原文读取/原文变化后的摘要停用。既有 XLSX、记忆主流程、首击/焦点、侧栏、Markdown 和真实扩展加载器回归通过。
+- 一次只读实现检查未发现实质回归。新 UI 测试曾把多词搜索当作精确短语，修正为唯一关键词后通过，产品搜索语义未改动。
+- 实际源码对照：200/50/10 全库搜索 2250→250 次正文读取、187.40→25.07 ms；800/80/20 为 16880→880 次、2325.41→180.68 ms。无命中媒体查询预览读取 6→0 次、1320011→2704 字节。
+- 单页面前后交替三轮，10 万格式化值构造器 100000→1，处理 2370.70→804.70 ms，完整显示值 SHA-256 一致。首个双页面脚本等待绘制帧超时，未计为通过；已检查无残留端口，改用单页静态模块对照。比较不宣称已经消除大表长任务。
+- 54 个 JavaScript 文件、9 个 Python 文件、Shell 语法、文档链接和差异空白检查通过；HTML、记忆总览及独立 CDP 面板也已回归。语言检查零失败，4 项为既有品牌标题。
+- 最终候选 50 文件、479844 字节，SHA-256 `0e4b9052d8f11c95d27c133ea65f8f8d627969806770f36b84d8e517811526e7`。未压缩归档、逐文件源码一致性、模块依赖与解包加载、私人路径扫描通过；没有测试、日志或用户资料。
+- 临时原生宿主官方 0.3.1 → 候选 0.3.3 升级通过，插件数据保留，权限差异为空。首阶段验收无剩余阻塞；候选未提交、推送、公开发布或替换运行实例，后续保存/刷新与分批解析仍未实施。
+
+## 0.3.2 XLSX 预览修复候选
+
+- 基线：已发布 0.3.1 的 `5e3a431`，独立分支 `fix/wiki-xlsx-preview`。确认两个缺口：已有 xlsx 只有附件卡片、没有网格预览，拖入的 xlsx 又被图片二进制专用校验拒绝。首批四项服务回归在旧实现失败。
+- 修复后 181 项 Node 测试全部通过，无失败/跳过/取消；51 个 JavaScript 文件、8 个 Python 文件与 Shell 语法、文档链接通过。新增测试覆盖原字节、64 KiB 分块边界、工作区变化、压缩/CRC/解压限制、实体拒绝、基本格式与过期视图。
+- `tests/xlsx-flow.py` 真实面板 → 服务 → 临时文件系统通过：中文/共享字符串/富文本、前导零、日期、数值、合并、公式缓存与缺失、工作表/分页、外置/导入/拖入、原件下载、损坏及系统打开失败、晚返回保护、深浅主题和响应宽度。
+- 项目中两份现有物料表只读验证通过，每份 155 个文本单元格与独立 openpyxl 读取一致，原文件哈希不变。样例公式及缓存日期另经 openpyxl 核验；没有写回、重算或上传用户表格。
+- 一次实现检查补充的边界已通过失败用例验证并修复：工作表异常时清空旧数据及禁用分页；混合图表页保留普通数据页；搜索/导出不预读外置二进制；多工作簿附件提供选择与各自下载。
+- 既有侧栏、首击/焦点、Markdown、HTML、记忆主流程、独立 CDP 面板及真实 TrustedExtensionRunner 回归通过。未使用真实模型、运行中的用户实例或第二套依赖环境，不运行 `verify:ui:*`。
+- 最终候选 48 文件、471273 字节，SHA-256 `8363e9b937868fa9eb4e3c7c8f150a0be66b12af772a7f7c5cc994cf3a53139d`。归档、源码逐字节、依赖及解包加载、私人路径检查通过。临时原生宿主官方 0.3.1 → 候选 0.3.2 升级通过，插件数据保留，权限差异为空。
+- 语言检查零失败，4 项为既有品牌标题。候选尚未提交、推送、公开发布或安装到运行实例。旧记录格式不变，修复验收无剩余阻塞。
+
 ## 0.3.1 市场发布准备
 
 - 用户已授权上传 `bone.project-wiki@0.3.1`。本版合并下方阶段 A 与侧栏的已验收功能，0.3.0 和 0.2.3 本地候选不单独提交；历史验收中的“未提交/未发布”描述记录当时状态。

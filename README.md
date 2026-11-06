@@ -10,12 +10,14 @@
 - **Markdown reading and source editing**: existing notes open as formatted read-only documents. Use **Edit record** to edit the source with automatic saving; **Read mode** waits for the latest save before showing the formatted result. New records start in editing mode. Titles continue to determine their Markdown filenames.
 - **全格式文件与多媒体支持**：
   - **文档**：原生 Markdown（`.md`）、纯文本（`.txt`）、Word 文档（`.docx`, `.doc`）、WPS 文档（`.wps`, `.wpt`）、PDF（`.pdf`）。
-  - **表格**：Excel 电子表格（`.xlsx`, `.xls`, `.csv`）、WPS 表格（`.et`, `.ett`）。
+  - **表格**：`.xlsx` 支持离线只读预览、工作表切换和分页，显示文本、数值、基本日期/数字格式及合并单元格；`.xls`、`.csv`、WPS 表格继续使用系统打开入口。
   - **演示**：PowerPoint（`.pptx`, `.ppt`）、WPS 演示（`.dps`, `.dpt`）、Keynote（`.key`）。
   - **多媒体**：图片（`.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`, `.svg`）、音频（`.mp3`, `.wav`, `.m4a`, `.ogg`, `.flac`）与视频（`.mp4`, `.webm`, `.mov`），内嵌原生播放与大图预览。
 - **External file synchronization**: activating the panel checks external changes in the background without replacing an active click target or clearing the current selection. Editing and unfinished memory-summary input remain intact. Use the tree refresh button for an explicit reload.
 - **扁平化矢量图标**：全套采用精致单色 1px 细线矢量 SVG 图标，自动适配亮色与暗色模式。
 - **Agent 协作记忆层**：在轮次结算后保存用户明确表达的具体偏好与事实；需要结合上文的记忆请求由 Agent 提炼后通过工具保存，下一轮以有篇幅限制的摘要与全文路径提供参考。
+- **First-stage performance improvements (included in 0.3.4)**: search verifies linked sources in one request, avoids duplicate body reads and does not generate media or HTML previews. XLSX workbooks reuse a bounded numeric formatter pool while preserving displayed values and read limits. Actual sources remain authoritative and facts are not cached across requests. See the [performance measurements and limits](docs/performance-optimizations.md).
+- **Save and latest-search performance (0.3.4)**: autosave keeps the active editor and applies a full refreshed snapshot without rebuilding the panel. Save and refresh reuse verified work within one operation; final conflict checks and write readback remain fresh. New search input cancels obsolete panel searches while queued writes retain their order. Partial refresh failures retain the saved revision and allow retry. See the [save and search contract](docs/operation-stage-two-contract.md) for compatibility and limits.
 
 ---
 
@@ -34,7 +36,8 @@
    - HTML/HTM files, existing HTML attachments and prototypes fill the right pane. The page follows its available width and height and scrolls internally; file actions and preview information are available from the small floating menu, without a surrounding card or repeated file heading;
    - 页面可使用内联样式、普通脚本及目录内引用的 CSS/JS 和 PNG/JPEG/WEBP/GIF 图片。预览为隔离环境，远程请求、模块脚本、子页面嵌入、表单提交和弹窗仍不支持；
    - 预览最多读取 100 个文件、合计 10 MB；缺失资源或无法读取会提示，并保留系统浏览器打开入口。原文件不会被转换或覆盖；
-   - Word、WPS、Excel、PDF 等办公文档提供一键“在系统中打开”与“在访达中定位”。
+   - `.xlsx` 可直接放入知识目录或拖入面板，选择后显示表格。公式仅显示已保存的结果；没有缓存时显示公式文本，不执行或重新计算。外置文件保留“在系统中打开”，已导入工作簿可下载原件。损坏、加密或超限会显示提示，详见[表格预览范围](docs/xlsx-preview.md)；
+   - Word、WPS、PDF 等办公文档沿用“在系统中打开”与“打开文件位置”。
 
 Markdown rendering runs fully offline and follows the host theme. Source HTML is displayed as text; relative/remote images show alternative text without automatic file or network requests. See [Markdown reading and editing](docs/markdown-view.md) and [third-party licenses](THIRD_PARTY_LICENSES.md).
 

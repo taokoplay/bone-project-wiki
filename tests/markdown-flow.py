@@ -147,13 +147,16 @@ with sync_playwright() as p:
         page.unroute('**/call', hold_save)
         assert call(page, 'read', recordId=entry['recordId'])['content'] == latest
 
-        # An input during a held snapshot also survives the mode transition.
+        # Input after the combined operation committed, before its response is applied, also survives.
         page.get_by_role('button', name='Edit record', exact=True).click()
         snapshots = []
         def hold_snapshot(route, request):
-            payload = (request.post_data_json or {}).get('input', {})
-            if payload.get('action') == 'snapshot' and not snapshots:
-                snapshots.append(route)
+            envelope = request.post_data_json or {}
+            payload = envelope.get('input', {})
+            if envelope.get('channel') == 'wiki.save' and payload.get('content') == latest + '\nBefore snapshot.\n' and not snapshots:
+                response = route.fetch()
+                assert response.json()['result']['snapshot']['requestCapabilities']['saveSnapshot'] is True
+                snapshots.append((route, response))
                 page.evaluate('window.markdownSnapshotPaused = true')
             else:
                 route.continue_()
@@ -163,7 +166,7 @@ with sync_playwright() as p:
         newest = latest + '\n## After snapshot input\n'
         page.locator('[name="content"]').fill(newest)
         page.get_by_role('button', name='Read mode', exact=True).click()
-        snapshots[0].continue_()
+        snapshots[0][0].fulfill(response=snapshots[0][1])
         expect(page.locator('.note-reader .article h2').last).to_have_text('After snapshot input')
         page.unroute('**/call', hold_snapshot)
         assert call(page, 'read', recordId=entry['recordId'])['content'] == newest
