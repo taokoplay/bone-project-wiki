@@ -184,8 +184,12 @@ test('agent settled automatically remembers explicit user preferences and skips 
   const f=await fixture(t); await f.request('init');
   const handlers={};
   const {default:extension}=await import('./extension.mjs');
-  extension({on:(name,handler)=>{handlers[name]=handler;},session:{getActive:async()=>({id:'session-1'}),get:async()=>({session:{messages:[{role:'user',content:'Please remember that I prefer concise answers.'},{role:'user',content:'My password is secret-123.'}]}})}});
-  await handlers.agent_settled({type:'agent_settled'},{cwd:f.root,ui:{notify:()=>{throw new Error('unexpected warning');}}});
+  extension({on:(name,handler)=>{handlers[name]=handler;}});
+  const ctx={cwd:f.root,ui:{notify:()=>{throw new Error('unexpected warning');}}};
+  await handlers.before_agent_start({systemPrompt:'BASE',prompt:'Please remember that I prefer concise answers.'},ctx);
+  await handlers.agent_settled({type:'agent_settled'},ctx);
+  await handlers.before_agent_start({systemPrompt:'BASE',prompt:'Please remember that my password is secret-123.'},ctx);
+  await handlers.agent_settled({type:'agent_settled'},ctx);
   const snapshot=await f.request('snapshot');
   const memories=snapshot.sections.memory.entries;
   assert.equal(memories.length,1);
@@ -196,7 +200,7 @@ test('plugin lifecycle registers the public tool and panel dispatch uses the sam
   const f=await fixture(t);const tools=new Map();const commands=new Map();
   global.pi={...f.api,agent:{registerTool:async tool=>tools.set(tool.name,tool),unregisterTool:async name=>tools.delete(name)},commands:{register:async command=>commands.set(command.id,command),unregister:async id=>commands.delete(id)},ui:{openPanel:async()=>{}}};
   t.after(()=>{delete global.pi;});
-  const plugin=require('./main.cjs');await plugin.onLoad();
+  const manifest=require('./manifest.json');assert.equal(manifest.main,'main.js');const plugin=require(`./${manifest.main}`);await plugin.onLoad();
   const tool=tools.get('project_wiki');assert.ok(tool);
   await tool.execute({action:'init',workspacePath:f.root});
   const entry=await tool.execute({action:'save',workspacePath:f.root,title:'Agent requirement',category:'requirements',content:'A representative user path'});
@@ -250,7 +254,7 @@ test('context since reports only records updated after a timestamp',async t=>{
 });
 test('panel locale channel delegates to the public host locale API',async()=>{
   global.pi={app:{getLocale:async()=> 'zh-CN'}};
-  try { assert.equal(await require('./main.cjs').onPanelInvoke('app.getLocale'), 'zh-CN'); }
+  try { assert.equal(await require(`./${require('./manifest.json').main}`).onPanelInvoke('app.getLocale'), 'zh-CN'); }
   finally { delete global.pi; }
 });
 test('a library larger than one listing page is read completely',async t=>{
@@ -295,7 +299,7 @@ test('turn-start context is a budgeted index with rules inline and bodies by poi
   entries.push({id:'a1',title:'Archived rule',category:'memory',kind:'memory',status:'archived',updatedAt:'2026-03-01T00:00:00.000Z',content:'must not appear'});
   const block=contextIndex(entries);
   assert.ok(block.length<=1200,`block is ${block.length} chars`);
-  assert.match(block,/## Agent memory \(6 of 9, newest first\)/);
+  assert.match(block,/## Agent memory \(6 of 9, relevance then recency\)/);
   assert.match(block,/Rule 8/);
   assert.doesNotMatch(block,/Rule 0:/);
   assert.doesNotMatch(block,/must not appear/);
@@ -303,9 +307,10 @@ test('turn-start context is a budgeted index with rules inline and bodies by poi
   assert.doesNotMatch(block,/Handoff A/);
   assert.match(block,/\{action:"read",id\}/);
   assert.doesNotMatch(block,/x{200}/);
-  const pressure=contextIndex([3,2,1,0].map(index=>rule(index,'y'.repeat(5000))));
-  assert.ok(pressure.length<=1200,`pressure block is ${pressure.length} chars`);
-  assert.match(pressure,/memories omitted/);
+  const pressure=contextIndex([3,2,1,0].map(index=>rule(index,'y'.repeat(5000))),{maxChars:700});
+  assert.ok(pressure.length<=700,`pressure block is ${pressure.length} chars`);
+  assert.match(pressure,/read full memory/);
+  assert.doesNotMatch(pressure,/y{20}/);
   assert.match(contextIndex([]),/No automatic memory recorded yet/);
 });
 test('the record index reuses unchanged records and re-reads only what changed',async t=>{

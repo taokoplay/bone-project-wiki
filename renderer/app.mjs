@@ -1,11 +1,23 @@
 import { t, setLocale, errorText } from './i18n.mjs';
-import { markdown, buildPrototype, safeImage, collectFiles } from './content.mjs';
+import { safeImage, collectFiles } from './content.mjs';
 import { createSelect, closeAnyControl, showContextMenu } from './controls.mjs';
+import { rememberDocumentForm } from './document-memory.mjs';
+import { mountNoteEditor } from './note-editor.mjs';
+import { htmlPreview } from './html-preview.mjs';
+import { noteReader } from './note-reader.mjs';
+import { watchFocusRefresh } from './focus-refresh.mjs';
+import { createMemoryOverview } from './memory-overview.mjs';
+import { createSidebarToggle } from './sidebar.mjs';
+import { spreadsheetPreview } from './spreadsheet.mjs';
+import { createLatestSearch } from './latest-search.mjs';
+import { saveRecord, withSavedEntry } from './save-record.mjs';
+import { createPointerUpdates } from './pointer-updates.mjs';
+import { createFileTree } from './file-tree.mjs';
 
-const bridge = window.pluginBridge;
+const bridge = window.pluginBridge, sidebar = createSidebarToggle(t, closeAnyControl);
 const app = document.querySelector('#app');
-const state = { snapshot: null, section: 'knowledge', category: '', topic: '', query: '', results: null, entry: null, mode: 'read', dirty: false, stale: false, busy: false, epoch: 0, view: 0, search: 0 };
-let detail, records, notice, searchTimer, editorDialog;
+const state = { snapshot: null, section: 'knowledge', category: '', topic: '', query: '', results: null, entry: null, mode: 'read', dirty: false, stale: false, busy: false, epoch: 0, view: 0, search: 0, memoryDraft: null };
+let detail, records, notice, editorDialog, overviewView, noteEditor;
 const sectionEntries = section => { const snapshotEntries = state.snapshot?.entries || []; if (section === 'memory') return state.snapshot?.sections ? [...(state.snapshot.sections.memory?.entries || []), ...(state.snapshot.sections.development?.entries || [])] : snapshotEntries.filter(entry => entry.kind === 'memory' || entry.category === 'memory' || entry.kind === 'handoff' || entry.category === 'development'); if (section === 'knowledge') return state.snapshot?.sections?.knowledge?.entries || snapshotEntries.filter(entry => entry.kind !== 'memory' && entry.category !== 'memory' && entry.kind !== 'handoff' && entry.category !== 'development'); return state.snapshot?.sections?.[section]?.entries || []; };
 const knowledgeCategories = () => {
   const listed = state.snapshot?.sections?.knowledge?.categories;
@@ -80,17 +92,18 @@ const active = epoch => epoch === state.epoch;
 function lock() {
   document.querySelectorAll('[data-mutation]').forEach(node => { node.disabled = state.busy || state.stale || !state.snapshot?.workspacePath; });
   document.querySelectorAll('form').forEach(node => { node.inert = state.busy; });
-  document.querySelectorAll('.note-title-input, .note-content-input, [name=\"title\"], [name=\"content\"]').forEach(node => { if (state.stale) node.readOnly = true; });
+  document.querySelectorAll('.memory-policy-editor').forEach(node => { node.inert = state.busy || state.stale; });
+  document.querySelectorAll('.note-title-input, .note-content-input, [name="title"], [name="content"], [name="memorySummary"], [name="readWhen"]').forEach(node => { if (state.stale) node.readOnly = true; });
   app.setAttribute('aria-busy', String(state.busy));
 }
 function mutation(node) { node.dataset.mutation = ''; return node; }
-async function request(action, payload = {}, epoch = state.epoch) {
+async function request(action, payload = {}, epoch = state.epoch, channel = 'wiki') {
   if (!bridge) throw new Error(t('unavailable'));
-  if (!active(epoch) || (action !== 'snapshot' && state.stale)) throw new Error(t('changed'));
+  if (!active(epoch) || (action !== 'snapshot' && state.stale)) throw Object.assign(new Error(t('changed')), { code: 'WORKSPACE_CHANGED' });
   const data = action === 'snapshot' ? { action } : { action, ...payload, workspacePath: state.snapshot?.workspacePath };
   if (action !== 'snapshot' && !data.workspacePath) throw new Error(t('noWorkspace'));
-  const result = await bridge.invoke('wiki', data);
-  if (!active(epoch)) throw new Error(t('changed'));
+  const result = await bridge.invoke(channel, data);
+  if (!active(epoch)) throw Object.assign(new Error(t('changed')), { code: 'WORKSPACE_CHANGED' });
   return result;
 }
 async function perform(work) {
@@ -102,8 +115,8 @@ async function perform(work) {
 }
 function leave() {
   if (state.busy) return false;
-  if (state.dirty && !window.confirm(t('discard'))) return false;
-  state.dirty = false;
+  if ((state.dirty || state.memoryDraft) && !window.confirm(t('discard'))) return false;
+  state.dirty = false; state.memoryDraft = null;
   if (state.stale) { refresh(); return false; }
   return true;
 }
@@ -124,7 +137,7 @@ function renderShell() {
   editorDialog = null;
   const header = element('header');
   const identity = element('div', undefined, 'identity');
-  identity.append(element('h1', t('library')));
+  identity.append(sidebar.button, element('h1', t('library')));
   const tools = element('div', undefined, 'tools');
   if (state.snapshot?.initialized) {
     const tabs = element('div', undefined, 'section-tabs');
@@ -147,7 +160,7 @@ function renderShell() {
   header.append(identity, tools);
   notice = element('div', undefined, 'notice'); notice.setAttribute('aria-live', 'polite');
   const shell = element('div', undefined, 'shell');
-  const library = element('section', undefined, 'library'); library.setAttribute('aria-label', t('all'));
+  const library = element('section', undefined, 'library'); library.setAttribute('aria-label', t('all')); sidebar.attach(shell, library);
   const sidebarHeader = element('div', undefined, 'sidebar-header');
   const vaultTitle = element('div', t('fileExplorer') || '文件', 'sidebar-vault-title');
   const sidebarTools = element('div', undefined, 'sidebar-tools');
@@ -190,7 +203,7 @@ function renderShell() {
   newBtn.innerHTML = '<svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><line x1=\"12\" y1=\"5\" x2=\"12\" y2=\"19\"></line><line x1=\"5\" y1=\"12\" x2=\"19\" y2=\"12\"></line></svg>';
   newBtn.addEventListener('click', () => {
     if (leave()) {
-      state.entry = null;
+      state.view++; state.mode = 'edit'; state.entry = null;
       renderDetail();
       detail.querySelector('[name=\"title\"]')?.focus();
     }
@@ -204,7 +217,7 @@ function renderShell() {
   sidebarTools.append(toggleAllBtn, refreshBtn, newFolderBtn, newBtn);
   sidebarHeader.append(vaultTitle, sidebarTools);
   const search = element('input'); search.type = 'search'; search.className = 'sidebar-search-input'; search.placeholder = state.section === 'memory' ? t('searchMemory') : t('search'); search.setAttribute('aria-label', search.placeholder); search.value = state.query;
-  search.addEventListener('input', () => { state.query = search.value; clearTimeout(searchTimer); const serial = ++state.search; searchTimer = setTimeout(() => runSearch(serial), 220); });
+  search.addEventListener('input', () => { state.query = search.value; latestSearch.change(); });
   records = element('div', undefined, 'tree-view records'); records.setAttribute('aria-live', 'polite');
   library.append(sidebarHeader, search, records);
   detail = element('main', undefined, 'detail'); detail.id = 'detail';
@@ -213,219 +226,69 @@ function renderShell() {
 }
 function switchSection(section) {
   if (!leave()) return;
+  latestSearch.invalidate(); state.results = null;
   state.section = section; state.category = section === 'knowledge' ? '' : section; state.topic = ''; state.entry = null; state.mode = 'read'; state.view++;
   renderShell(); renderList(); renderDetail();
+  if (state.query.trim()) latestSearch.change();
 }
 const collapsedFolders = new Set();
-function renderList() {
-  records.replaceChildren();
-  const entries = (state.results ?? currentEntries()).filter(e => e.status !== 'archived');
-  if (state.section === 'memory' && !entries.length) {
-    records.append(element('p', state.query ? t('noResults') : t('noRecords'), 'hint'));
-    return;
-  }
-  if (state.section === 'knowledge') {
-    if (state.query && !entries.length) {
-      records.append(element('p', t('noResults'), 'hint'));
-      return;
-    }
-    const discoveredCategories = knowledgeCategories();
-    const allCategories = [...new Set([...discoveredCategories, ...entries.map(e => e.category).filter(Boolean)])].sort();
-    if (!allCategories.length && !entries.length) {
-      records.append(element('p', currentEntries().length ? t('noResults') : t('noRecords'), 'hint'));
-      return;
-    }
-    allCategories.forEach(cat => {
-      const catEntries = entries.filter(e => e.category === cat);
-      if (!catEntries.length && state.query) return;
-      const group = element('div', undefined, 'tree-group'); group.dataset.category = cat;
-      const folder = element('div', undefined, 'tree-folder'); folder.setAttribute('role', 'treeitem');
-      const isCollapsed = collapsedFolders.has(cat); folder.setAttribute('aria-expanded', String(!isCollapsed));
-      const chevron = element('span', undefined, 'tree-chevron');
-      chevron.innerHTML = '<svg class=\"tree-chevron-svg\" width=\"9\" height=\"9\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><polyline points=\"9 18 15 12 9 6\"></polyline></svg>';
-      const icon = element('span', undefined, 'tree-folder-icon');
-      icon.innerHTML = '<svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z\"></path></svg>';
-      const name = element('span', t(cat) || cat, 'tree-folder-name'); const count = element('span', String(catEntries.length), 'tree-folder-count');
-      const addBtn = element('button', undefined, 'tree-folder-add');
-      addBtn.type = 'button';
-      addBtn.setAttribute('title', `在 ${t(cat) || cat} 中新建文件`);
-      addBtn.setAttribute('aria-label', `在 ${t(cat) || cat} 中新建文件`);
-      addBtn.innerHTML = '<svg width=\"11\" height=\"11\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><line x1=\"12\" y1=\"5\" x2=\"12\" y2=\"19\"></line><line x1=\"5\" y1=\"12\" x2=\"19\" y2=\"12\"></line></svg>';
-      addBtn.addEventListener('click', event => {
-        event.stopPropagation();
-        if (leave()) {
-          folder.setAttribute('aria-expanded', 'true');
-          collapsedFolders.delete(cat);
-          state.category = cat;
-          state.entry = null;
-          renderDetail();
-          detail.querySelector('[name=\"title\"]')?.focus();
-        }
-      });
-      folder.append(chevron, icon, name, count, addBtn);
-      folder.addEventListener('click', () => {
-        const currentlyExpanded = folder.getAttribute('aria-expanded') !== 'false';
-        if (currentlyExpanded) { folder.setAttribute('aria-expanded', 'false'); collapsedFolders.add(cat); }
-        else { folder.setAttribute('aria-expanded', 'true'); collapsedFolders.delete(cat); }
-      });
-      folder.addEventListener('contextmenu', event => {
-        event.preventDefault();
-        showContextMenu(event.clientX, event.clientY, [
-          {
-            icon: '🔍', label: t('revealInFinder'),
-            action: () => perform(async epoch => { await executeReveal(`.bone-project-wiki/knowledge/${cat}`); })
-          },
-          { separator: true },
-          {
-            icon: '🗑️', label: t('deleteCategory'), danger: true,
-            action: () => {
-              if (!window.confirm(t('deleteCategoryConfirm'))) return;
-              perform(async epoch => {
-                await request('deleteCategory', { category: cat }, epoch);
-                if (state.category === cat) state.category = '';
-                if (state.entry?.category === cat) {
-                  state.entry = null;
-                  renderDetail();
-                }
-                await updateSnapshot(epoch);
-                message(t('deletedCategory'));
-              });
-            }
-          }
-        ]);
-      });
-      const children = element('div', undefined, 'tree-children'); children.setAttribute('role', 'group');
-      catEntries.forEach((entry, index) => {
-        const node = element('button', undefined, 'record tree-item'); node.type = 'button'; node.style.setProperty('--i', String(index));
-        node.setAttribute('aria-pressed', String(entry.id === state.entry?.id));
-        const itemIcon = element('span', undefined, 'tree-item-icon');
-        itemIcon.innerHTML = getFileIconSvg(entry, 13);
-        const strong = element('strong', entry.title, 'tree-item-title');
-        node.append(itemIcon, strong);
-        node.addEventListener('click', () => { if (leave()) openRecord(entry.id); });
-        node.addEventListener('contextmenu', event => {
-          event.preventDefault();
-          const targetCats = knowledgeCategories().filter(c => c !== entry.category);
-          const moveChildren = targetCats.map(targetCat => ({
-            icon: '📁',
-            label: t(targetCat) || targetCat,
-            action: () => {
-              perform(async epoch => {
-                const moved = await executeMove(entry, targetCat, epoch);
-                state.entry = moved;
-                await updateSnapshot(epoch);
-                message(`已移动到 ${t(targetCat) || targetCat}`);
-              });
-            }
-          }));
-          if (moveChildren.length) moveChildren.push({ separator: true });
-          moveChildren.push({
-            icon: '＋',
-            label: t('newFolder') || '新建目录…',
-            action: () => {
-              promptText({
-                title: t('newFolder') || '新建目录并移动',
-                placeholder: '输入目标目录名称...',
-                onConfirm: cleanCat => {
-                  perform(async epoch => {
-                    const moved = await executeMove(entry, cleanCat, epoch);
-                    state.entry = moved;
-                    await updateSnapshot(epoch);
-                    message(`已移动到 ${t(cleanCat) || cleanCat}`);
-                  });
-                }
-              });
-            }
-          });
-          const menuItems = [{
-            icon: '📁', label: t('moveTo'), children: moveChildren
-          }, {
-            icon: '🔍', label: t('revealInFinder'),
-            action: () => perform(async epoch => { await executeReveal(entry.path); })
-          }, { separator: true }, {
-            icon: '🗑️', label: t('deleteDoc'), danger: true,
-            action: () => {
-              if (!window.confirm(t('deleteConfirm'))) return;
-              perform(async epoch => {
-                await executeDelete(entry, epoch);
-                if (state.entry?.id === entry.id) { state.entry = null; renderDetail(); }
-                await updateSnapshot(epoch);
-                message(t('deletedDoc'));
-              });
-            }
-          }];
-          showContextMenu(event.clientX, event.clientY, menuItems);
-        });
-        children.append(node);
-      });
-      group.append(folder, children); records.append(group);
-    });
-  } else {
-    const group = element('div', undefined, 'tree-group'); group.dataset.category = 'memory';
-    const folder = element('div', undefined, 'tree-folder'); folder.setAttribute('role', 'treeitem');
-    const isCollapsed = collapsedFolders.has('memory'); folder.setAttribute('aria-expanded', String(!isCollapsed));
-    const chevron = element('span', undefined, 'tree-chevron');
-    chevron.innerHTML = '<svg class=\"tree-chevron-svg\" width=\"9\" height=\"9\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><polyline points=\"9 18 15 12 9 6\"></polyline></svg>';
-    const icon = element('span', undefined, 'tree-folder-icon');
-    icon.innerHTML = '<svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z\"></path></svg>';
-    const name = element('span', t('projectMemory'), 'tree-folder-name'); const count = element('span', String(entries.length), 'tree-folder-count');
-    folder.append(chevron, icon, name, count);
-    folder.addEventListener('click', () => {
-      const currentlyExpanded = folder.getAttribute('aria-expanded') !== 'false';
-      if (currentlyExpanded) { folder.setAttribute('aria-expanded', 'false'); collapsedFolders.add('memory'); }
-      else { folder.setAttribute('aria-expanded', 'true'); collapsedFolders.delete('memory'); }
-    });
-    const children = element('div', undefined, 'tree-children'); children.setAttribute('role', 'group');
-    entries.forEach((entry, index) => {
-      const node = element('button', undefined, 'record tree-item'); node.type = 'button'; node.style.setProperty('--i', String(index));
-      node.setAttribute('aria-pressed', String(entry.id === state.entry?.id));
-      const itemIcon = element('span', undefined, 'tree-item-icon');
-      itemIcon.innerHTML = getFileIconSvg(entry, 13);
-      const strong = element('strong', entry.title, 'tree-item-title');
-      node.append(itemIcon, strong);
-      node.addEventListener('click', () => { if (leave()) openRecord(entry.id); });
-      node.addEventListener('contextmenu', event => {
-        event.preventDefault();
-        const menuItems = [{
-          icon: '🔍', label: t('revealInFinder'),
-          action: () => perform(async epoch => { await executeReveal(entry.path); })
-        }, { separator: true }, {
-          icon: '🗑️', label: t('deleteDoc'), danger: true,
-          action: () => {
-            if (!window.confirm(t('deleteConfirm'))) return;
-            perform(async epoch => {
-              await executeDelete(entry, epoch);
-              if (state.entry?.id === entry.id) { state.entry = null; renderDetail(); }
-              await updateSnapshot(epoch);
-              message(t('deletedDoc'));
-            });
-          }
-        }];
-        showContextMenu(event.clientX, event.clientY, menuItems);
-      });
-      children.append(node);
-    });
-    group.append(folder, children); records.append(group);
-  }
+const pointerUpdates = createPointerUpdates();
+const defer = (owner, apply) => pointerUpdates.run(owner, apply);
+const fileTree = createFileTree({
+  state, target: () => records, entries: () => state.results ?? currentEntries(),
+  categories: knowledgeCategories, allEntries: () => [...sectionEntries('knowledge'), ...sectionEntries('memory')],
+  element, t, icon: getFileIconSvg, collapsed: collapsedFolders, leave, openRecord,
+  onNew: category => {
+    state.category = category; state.entry = null; state.mode = 'edit'; state.view++;
+    renderDetail(); detail.querySelector('[name="title"]')?.focus();
+  },
+  perform, move: executeMove, remove: executeDelete, reveal: executeReveal,
+  deleteCategory: (category, epoch) => request('deleteCategory', { category }, epoch),
+  promptText, showContextMenu,
+  onMoved: entry => { state.entry = entry; },
+  onRemoved: entry => { if (state.entry?.id === entry.id) { state.entry = null; renderDetail(); } },
+  onCategoryRemoved: category => {
+    if (state.category === category) state.category = '';
+    if (state.entry?.category === category) { state.entry = null; renderDetail(); }
+  },
+  refresh: updateSnapshot, message, defer,
+});
+function renderList() { fileTree.render(); }
+const latestSearch = createLatestSearch({ state,
+  invoke: (channel, input) => bridge.invoke(channel, input), request,
+  onResults: results => { state.results = results; renderList(); },
+  onLoading: () => fileTree.loading(), onError: problem,
+});
+function saveNote(payload, epoch, onEntry) {
+  return saveRecord({ payload, capabilities: state.snapshot?.requestCapabilities,
+    request: (action, input = {}, channel = 'wiki') => request(action, input, epoch, channel),
+    onEntry: saved => {
+      onEntry(saved);
+      if (active(epoch) && state.entry === saved) state.snapshot = withSavedEntry(state.snapshot, saved);
+    },
+  });
 }
-async function runSearch(serial) {
-  if (!state.snapshot?.initialized || state.stale) return;
-  const epoch = state.epoch;
-  if (!state.query.trim()) { state.results = null; renderList(); return; }
-  records.replaceChildren(element('p', t('loading'), 'hint'));
-  try {
-    const results = await request('search', { query: state.query }, epoch);
-    if (serial !== state.search) return;
-    state.results = results; renderList();
-  } catch (error) { if (active(epoch) && serial === state.search) problem(error); }
+function applySaveSnapshot(snapshot, epoch) {
+  if (!active(epoch)) return;
+  if (snapshot.workspacePath !== state.snapshot?.workspacePath || !snapshot.initialized) { workspaceChanged(); return; }
+  state.snapshot = snapshot;
+  if (state.query.trim()) latestSearch.change();
+  else { state.results = null; renderList(); }
 }
 async function refresh() {
+  const workspacePath = state.snapshot?.workspacePath || state.memoryDraft?.workspacePath;
+  const draft = state.memoryDraft;
+  latestSearch.invalidate();
   const epoch = ++state.epoch; state.view++; state.search++;
   state.dirty = false; state.stale = false; state.busy = false; state.entry = null; state.results = null; state.query = ''; state.topic = ''; state.snapshot = null; state.mode = 'read'; state.drawer = false;
   renderShell(); empty(detail, 'loading', 'pending');
   try {
     state.snapshot = await request('snapshot', {}, epoch);
+    if (state.snapshot.workspacePath !== workspacePath) state.memoryDraft = null;
+    const restoreDraft = draft && state.memoryDraft === draft && draft.workspacePath === state.snapshot.workspacePath;
+    if (restoreDraft) { state.section = 'knowledge'; state.category = ''; }
     renderShell(); renderList(); renderDetail();
+    if (restoreDraft) void openRecord({ recordId: draft.recordId, section: 'knowledge' });
     if (state.snapshot.corrupted?.length) message(`${t('corrupted')}: ${state.snapshot.corrupted.map(item => item.path).join(', ')}`, true);
   } catch (error) {
     if (!active(epoch)) return;
@@ -433,6 +296,9 @@ async function refresh() {
   }
 }
 function renderDetail() {
+  noteEditor?.dispose(); noteEditor = null;
+  if (state.query.trim()) latestSearch.change();
+  overviewView = null;
   const snapshot = state.snapshot;
   if (!snapshot?.workspacePath) { empty(detail, 'library', 'noWorkspace'); return; }
   if (!snapshot.initialized) {
@@ -440,19 +306,72 @@ function renderDetail() {
       state.snapshot = await request('init', {}, epoch); renderShell(); renderList(); renderDetail(); message(t('initialized'));
     }), true))); lock(); return;
   }
+  if (!state.entry && state.section === 'memory' && state.mode !== 'edit' && snapshot.memoryCapabilities?.overview) {
+    const epoch = state.epoch, view = state.view;
+    const current = () => active(epoch) && view === state.view && state.section === 'memory' && !state.stale;
+    overviewView = createMemoryOverview(t, {
+      load:(action,payload={})=>request(action,payload,epoch), isCurrent:current,
+      onOpenMemory:id=>{ if (current()&&leave()) void openRecord({id,section:'memory'}); },
+      onOpenSource:recordId=>{
+        if (!current()||!leave()) return;
+        latestSearch.invalidate();
+        state.section='knowledge'; state.category=''; state.query=''; state.results=null;
+        renderShell(); renderList(); void openRecord({recordId,section:'knowledge'});
+      },
+      onNew:()=>{ if (current()&&leave()) { state.view++; state.mode='edit'; state.entry=null; renderDetail(); detail.querySelector('[name="title"]')?.focus(); } }
+    });
+    detail.replaceChildren(overviewView.element); return;
+  }
   if (!state.entry || ['document', 'memory', 'handoff'].includes(state.entry.kind)) {
-    renderNoteEditor(state.entry);
+    if (!state.entry || (state.mode === 'edit' && !state.entry.documentRef)) {
+      state.mode = 'edit'; renderNoteEditor(state.entry);
+    } else {
+      const entry = state.entry;
+      detail.replaceChildren(noteReader(entry, t, {
+        onEdit: () => {
+          if (state.busy || state.stale) return;
+          state.view++; state.mode = 'edit'; renderDetail();
+          detail.querySelector('[name="content"]')?.focus();
+        },
+        onOpenSource: id => {
+          if (!leave()) return;
+          latestSearch.invalidate();
+          state.section = 'knowledge'; state.category = ''; state.query = ''; state.results = null;
+          renderShell(); renderList(); void openRecord({ recordId: id, section: 'knowledge' });
+        },
+        onForget: () => forgetMemory(entry)
+      }));
+      if (state.section === 'memory' && snapshot.memoryCapabilities?.overview) {
+        const back = button('memoryOverviewTitle',()=>{
+          if (!leave()) return;
+          state.view++; state.entry=null; state.mode='read'; renderList(); renderDetail();
+        });
+        detail.querySelector('.note-mode-bar')?.prepend(back);
+      }
+      appendDocumentMemory(entry); lock();
+    }
     return;
   }
-  const entry = state.entry; detail.replaceChildren();
+  const entry = state.entry;
+  if (entry.spreadsheetPreview) {
+    const epoch=state.epoch,view=state.view;
+    detail.replaceChildren(spreadsheetPreview(entry,t,{isCurrent:()=>active(epoch)&&state.view===view&&state.entry===entry&&!state.stale,
+      onOpen:()=>request('openDefault',{path:entry.path},epoch).then(result=>{if(!result?.opened)throw new Error('OPEN_DEFAULT_UNAVAILABLE');}),
+      onReveal:()=>executeReveal(entry.path)}));
+    return;
+  }
+  if (entry.kind === 'prototype' || entry.htmlPreview) {
+    const actions = entry.htmlPreview ? [
+      button('openInSystem', () => { void request('openDefault', { path: entry.path }).catch(problem); }),
+      button('revealInFinder', () => { void executeReveal(entry.path); })
+    ] : [];
+    detail.replaceChildren(htmlPreview(entry.htmlPreview || entry, entry.title, t, actions));
+    return;
+  }
+  detail.replaceChildren();
   const article = element('article');
   article.append(element('div', t(entry.category === 'development' ? 'projectMemory' : entry.category), 'section-label'), element('h2', entry.title));
-  if (entry.kind === 'prototype') {
-    article.append(element('p', t('limitations'), 'hint'));
-    try {
-      const frame = element('iframe', undefined, 'preview'); frame.title = entry.title; frame.setAttribute('sandbox', 'allow-scripts'); frame.setAttribute('referrerpolicy', 'no-referrer'); frame.srcdoc = buildPrototype(entry); article.append(frame);
-    } catch (error) { article.append(element('p', error.message, 'hint')); }
-  } else if (entry.kind === 'image') {
+  if (entry.kind === 'image') {
     let hasPreview = false;
     for (const file of entry.files || []) {
       if (file.dataUrl && safeImage(file.dataUrl)) {
@@ -657,88 +576,68 @@ async function createDirectory(category, epoch) {
     throw err;
   }
 }
-let autoSaveTimer = null;
 function renderNoteEditor(entry) {
-  detail.replaceChildren();
-  const form = element('form', undefined, 'note-editor');
-  const titleInput = element('input', undefined, 'note-title-input');
-  titleInput.type = 'text'; titleInput.name = 'title'; titleInput.placeholder = t('title'); titleInput.value = entry?.title || '';
-  const divider = element('div', undefined, 'note-title-divider');
-  const contentInput = element('textarea', undefined, 'note-content-input');
-  contentInput.name = 'content'; contentInput.placeholder = t('content'); contentInput.value = entry?.content || '';
-  if (state.stale) { titleInput.readOnly = true; contentInput.readOnly = true; }
-  const submitBtn = mutation(element('button', undefined)); submitBtn.type = 'submit'; submitBtn.style.display = 'none'; submitBtn.setAttribute('aria-hidden', 'true');
-  form.append(titleInput, divider, contentInput, submitBtn);
-  if (entry?.kind === 'memory') {
-    const memoryBar = element('div', undefined, 'memory-bar');
-    memoryBar.append(mutation(button('forget', () => {
-      if (!window.confirm(t('forgetConfirm'))) return;
-      perform(async epoch => {
-        await request('forget', { id: entry.id, expectedRevision: entry.revision }, epoch);
-        state.entry = null;
-        await updateSnapshot(epoch);
-        renderDetail();
-        message(t('deleted'));
-      });
-    })));
-    form.append(memoryBar);
-  }
-  async function performSave() {
-    const rawTitle = titleInput.value.trim();
-    const content = contentInput.value;
-    if (!rawTitle && !content.trim() && !state.entry) return;
-    let title = rawTitle;
-    if (!title) {
-      const firstLine = content.trim().split('\n')[0]?.replace(/^[#\s*-]+/, '').trim();
-      title = firstLine ? firstLine.slice(0, 50) : (state.entry?.title || '未命名文档');
-    }
-    const category = entry?.category || (state.section === 'knowledge' && state.category ? state.category : 'general');
-    const epoch = state.epoch;
-
-    try {
-      const saved = await request('save', {
-        title,
-        content,
-        category,
-        kind: entry?.kind || (state.section === 'memory' ? 'memory' : 'document'),
-        status: entry?.status || 'draft',
-        topics: entry?.topics || [],
-        tags: entry?.tags || [],
-        ...(state.entry ? { id: state.entry.id, expectedRevision: state.entry.revision } : {})
-      }, epoch);
-      state.entry = saved;
-      state.dirty = false;
-      await updateSnapshot(epoch);
-      message(t('saved'));
-    } catch (err) {
-      message(errorText(err), true);
-    }
-  }
-  function onInput() {
-    state.dirty = true;
-    clearTimeout(autoSaveTimer);
-    autoSaveTimer = setTimeout(performSave, 350);
-  }
-  titleInput.addEventListener('input', onInput);
-  contentInput.addEventListener('input', onInput);
-  form.addEventListener('submit', event => {
-    event.preventDefault();
-    clearTimeout(autoSaveTimer);
-    performSave();
+  noteEditor = mountNoteEditor(entry, { state, detail, element, t, button, mutation,
+    save: saveNote, onSnapshot: applySaveSnapshot,
+    onSavedControls: saved => { if (!detail.querySelector('.document-memory-editor')) appendDocumentMemory(saved); },
+    renderDetail, appendDocumentMemory, message, errorText, forgetMemory, lock, defer,
   });
-  detail.append(form);
+}
+function forgetMemory(entry) {
+  if (!window.confirm(t('forgetConfirm'))) return;
+  void perform(async epoch => {
+    await request('forget', { id: entry.id, expectedRevision: entry.revision }, epoch);
+    state.entry = null;
+    await updateSnapshot(epoch);
+    message(t('deleted'));
+  });
+}
+function appendDocumentMemory(entry) {
+  const editorEpoch = state.epoch, editorView = state.view;
+  if (entry?.kind === 'document' && entry.status !== 'archived') {
+    const workspacePath = state.snapshot.workspacePath;
+    const draft = state.memoryDraft?.workspacePath === workspacePath && state.memoryDraft.recordId === entry.recordId ? state.memoryDraft : null;
+    const policy = sectionEntries('memory').find(row => row.documentRef?.recordId === entry.recordId);
+    const captureDraft = values => {
+      if (!active(editorEpoch) || editorView !== state.view || state.stale) return;
+      const policyChanged = JSON.stringify(values.scopePaths || []) !== JSON.stringify(policy?.scopePaths || [])
+        || (values.importance || 'normal') !== (policy?.importance || 'normal');
+      state.memoryDraft = values.summary || values.readWhen || policyChanged ? { workspacePath, recordId: entry.recordId, ...values } : null;
+      message(t('unsaved'));
+    };
+    detail.append(rememberDocumentForm(entry, t, { draft, policy, onDraftChange: captureDraft, onRemember: values => {
+      if (state.dirty) { problem(new Error(t('saveBeforeLink'))); return; }
+      captureDraft(values);
+      void perform(async epoch => {
+        const saved = await request('remember', { ...state.entry, ...values, kind: 'document', status: 'confirmed', expectedRevision: state.entry.revision }, epoch);
+        state.entry = saved.document;
+        if (saved.linked) state.memoryDraft = null;
+        await updateSnapshot(epoch);
+        message(t(saved.linked ? 'memoryLinked' : 'memoryLinkPartial'), !saved.linked);
+      });
+    } }));
+  }
   lock();
 }
-async function openRecord(id) {
-  const view = ++state.view, epoch = state.epoch; state.mode = 'read';
+async function openRecord(selector) {
+  const payload = typeof selector === 'string' ? { id: selector } : selector;
+  const view = ++state.view, epoch = state.epoch; state.mode = 'read'; state.entry = null;
   empty(detail, 'loading', 'pending');
-  try { const entry = await request('read', { id }, epoch); if (view !== state.view) return; state.entry = entry; renderList(); renderDetail(); }
-  catch (error) { if (active(epoch) && view === state.view) { empty(detail, 'error', 'retry', button('retry', () => openRecord(id))); problem(error); } }
+  try { const entry = await request('read', payload, epoch); if (view !== state.view) return; state.entry = entry; renderList(); renderDetail(); }
+  catch (error) { if (active(epoch) && view === state.view) { empty(detail, 'error', 'retry', button('retry', () => openRecord(selector))); problem(error); } }
 }
-async function updateSnapshot(epoch) {
-  state.snapshot = await request('snapshot', {}, epoch);
+async function updateSnapshot(epoch, isCurrent = () => true, beforeRender = () => {}) {
+  const snapshot = await request('snapshot', {}, epoch);
+  if (!isCurrent()) return false;
+  if (snapshot.workspacePath !== state.snapshot?.workspacePath) {
+    state.memoryDraft = null; state.entry = null; state.dirty = false; state.view++;
+  }
+  else beforeRender();
+  state.snapshot = snapshot;
+  latestSearch.invalidate();
   state.results = null; state.query = ''; state.search++;
   renderShell(); renderList(); renderDetail();
+  return true;
 }
 function field(form, name, label, value = '') {
   const wrapper = element('label', undefined, 'field'); wrapper.append(element('span', t(label)));
@@ -898,9 +797,12 @@ function importView() {
   });
 }
 function workspaceChanged() {
-  if (state.dirty) {
+  latestSearch.invalidate();
+  if (state.dirty || state.memoryDraft) {
     state.epoch++; state.view++; state.search++; state.stale = true; state.busy = false;
-    message(t('stale'), true); notice.append(document.createTextNode(' '), button('discardDraft', () => { if (window.confirm(t('discard'))) refresh(); })); lock();
+    message(t('stale'), true); notice.append(document.createTextNode(' '), button('discardDraft', () => {
+      if (window.confirm(t('discard'))) { state.memoryDraft = null; refresh(); }
+    })); lock();
   } else refresh();
 }
 function appearance(value) {
@@ -911,7 +813,8 @@ function appearance(value) {
   if (!theme) { theme = document.createElement('style'); theme.id = 'host-plugin-theme'; document.head.append(theme); }
   theme.textContent = typeof value?.pluginTheme?.css === 'string' ? value.pluginTheme.css : '';
 }
-window.addEventListener('beforeunload', event => { if (state.dirty) { event.preventDefault(); event.returnValue = ''; } });
+window.addEventListener('beforeunload', event => { if (state.dirty || state.memoryDraft) { event.preventDefault(); event.returnValue = ''; } });
+window.addEventListener('pagehide', () => { latestSearch.dispose(); noteEditor?.dispose(); clearTimeout(noticeTimer); }, { once: true });
 let dropOverlay = null;
 async function extractDropEntries(dataTransfer) {
   const result = [];
@@ -1048,15 +951,19 @@ function setupDragAndDrop() {
     const items = await extractDropEntries(event.dataTransfer);
     if (items.length) await handleDroppedItems(items);
   });
-  window.addEventListener('focus', () => {
-    if (!state.dirty && !state.busy && state.snapshot?.initialized) {
-      refresh();
-    }
-  });
 }
-window.wikiUi = { handleDroppedFiles, preferences, importView, context, exportHtml, editRecord: entry => { state.view++; state.entry = entry || null; renderDetail(); }, refresh };
+window.wikiUi = { handleDroppedFiles, preferences, importView, context, exportHtml, editRecord: entry => { state.view++; state.mode = 'edit'; state.entry = entry || null; renderDetail(); }, refresh };
 async function start() {
   setupDragAndDrop();
+  watchFocusRefresh({ state, request, onWorkspaceChanged: workspaceChanged, onError: problem,
+    onSnapshot: (snapshot, entry) => {
+      state.snapshot = snapshot;
+      if (entry !== undefined) state.entry = entry;
+      if (state.results === null) renderList();
+      if (entry !== undefined) renderDetail();
+      else if (overviewView?.element.isConnected) void overviewView.refresh();
+    }
+  });
   renderShell(); empty(detail, 'loading', 'pending');
   if (bridge) {
     try { setLocale(await bridge.invoke('app.getLocale')); } catch (error) { console.error('Locale lookup failed', error); }

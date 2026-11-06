@@ -1,6 +1,7 @@
 import { t } from './i18n.mjs';
 
-export const safeImage = value => typeof value === 'string' && /^data:image\/(png|jpeg|webp|gif);base64,[a-z\d+/=\s]+$/i.test(value);
+import { safeImage } from './markdown.mjs';
+export { safeImage, markdown } from './markdown.mjs';
 
 function resolvePath(base, ref) {
   if (!ref || /^(?:[a-z][a-z\d+.-]*:|\/\/|\/|#)/i.test(ref)) return null;
@@ -67,30 +68,6 @@ export function buildPrototype(entry) {
   return '<!doctype html>\n' + doc.documentElement.outerHTML;
 }
 
-export function markdown(content) {
-  const fragment = document.createDocumentFragment();
-  let list = null, code = null;
-  for (const line of String(content || '').split('\n')) {
-    if (/^```/.test(line)) {
-      if (code) code = null;
-      else { code = document.createElement('pre'); fragment.append(code); }
-      list = null; continue;
-    }
-    if (code) { code.textContent += line + '\n'; continue; }
-    if (!line.trim()) { list = null; continue; }
-    const heading = line.match(/^(#{1,6})\s+(.+)$/);
-    const item = line.match(/^\s*(?:[-*]|\d+\.)\s+(.+)$/);
-    if (item) {
-      if (!list) { list = document.createElement('ul'); fragment.append(list); }
-      const li = document.createElement('li'); li.textContent = item[1]; list.append(li);
-    } else {
-      list = null;
-      const node = document.createElement(heading ? `h${heading[1].length}` : 'p');
-      node.textContent = heading ? heading[2] : line; fragment.append(node);
-    }
-  }
-  return fragment;
-}
 
 export async function collectFiles(input) {
   const files = [...input];
@@ -102,13 +79,14 @@ export async function collectFiles(input) {
     const path = file.webkitRelativePath || file.name;
     if (seen.has(path)) throw new Error(`${t('duplicate')}: ${path}`);
     seen.add(path);
-    if (/\.(png|jpe?g|webp|gif)$/i.test(path)) {
+    if (/\.(png|jpe?g|webp|gif|xlsx)$/i.test(path)) {
       const dataUrl = await new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onerror = () => reject(new Error(`${t('error')}: ${path}`));
         reader.onload = () => resolve(reader.result);
         const extension = path.split('.').at(-1).toLowerCase();
-        reader.readAsDataURL(new Blob([file], { type: `image/${extension === 'jpg' ? 'jpeg' : extension}` }));
+        const type = extension === 'xlsx' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : `image/${extension === 'jpg' ? 'jpeg' : extension}`;
+        reader.readAsDataURL(new Blob([file], { type }));
       });
       result.push({ path, dataUrl });
     } else if (/\.(html?|css|m?js|txt|md|json|csv)$/i.test(path)) {

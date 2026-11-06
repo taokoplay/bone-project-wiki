@@ -8,14 +8,19 @@ const {WikiService} = require('../service.cjs');
 async function main() {
   const root = await fs.mkdtemp(path.join(process.env.PI_SCRATCH_DIR || os.tmpdir(),'bone-wiki-flow-'));
   let settings = {};
+  let failMemory = false;
+  const hostActions = [];
   const service = new WikiService({
     workspace:{get:async()=>({path:root,name:'BoneProjectWiki acceptance'})},
     plugin:{getSettings:async()=>settings,setSettings:async patch=>{settings={...settings,...patch};}},
     fs:{
+      openDefault: async p => { hostActions.push({ action: 'openDefault', path: p }); return { opened: true }; },
       readText:p=>fs.readFile(path.join(root,p),'utf8'),
-      writeText:async(p,data)=>{const target=path.join(root,p);await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,data);},
+      readRange:async(p,offset,length)=>{const bytes=await fs.readFile(path.join(root,p));return {bytes:Uint8Array.from(bytes.subarray(offset,offset+length)),totalSize:bytes.length};},
+      writeText:async(p,data)=>{if(failMemory && p.startsWith('.bone-project-wiki/memory/') && p.endsWith('.md'))throw new Error('Test memory write failure');const target=path.join(root,p);await fs.mkdir(path.dirname(target),{recursive:true});await fs.writeFile(target,data);},
       remove:p=>fs.unlink(path.join(root,p)),
       stat:async p=>{const info=await fs.stat(path.join(root,p));return {size:info.size,mtimeMs:info.mtimeMs};},
+      readPreview: async p => ({dataUrl:`data:image/png;base64,${(await fs.readFile(path.join(root,p))).toString('base64')}`}),
       list:async dir=>{
         let entries;
         try{entries=await fs.readdir(path.join(root,dir),{withFileTypes:true});}
@@ -31,9 +36,62 @@ async function main() {
       }
     }
   });
+  const handlers = {};
+  const extension = (await import('../extension.mjs')).default;
+  extension({on:(event,handler)=>{handlers[event]=handler;}});
   const server=http.createServer(async(req,res)=>{
     try {
       const route=new URL(req.url,'http://localhost').pathname;
+      if(route==='/test/xlsx-fixture' && req.method==='POST') {
+        const {makeWorkbook,workbookParts,zip}=require('./xlsx-fixtures.cjs');
+        const directory=path.join(root,'.bone-project-wiki/knowledge/物料');await fs.mkdir(directory,{recursive:true});
+        const bytes=makeWorkbook();await fs.writeFile(path.join(directory,'采购清单.xlsx'),bytes);
+        await fs.writeFile(path.join(directory,'损坏.xlsx'),'not a workbook');
+        const parts=workbookParts();parts['xl/worksheets/sheet2.xml']=parts['xl/worksheets/sheet2.xml'].replace('A101','A2001').replace('r="101"','r="2001"');
+        await fs.writeFile(path.join(directory,'长表.xlsx'),zip(parts));
+        const imported=await service.request({action:'import',workspacePath:root,kind:'attachment',category:'物料',title:'导入的清单',files:[{path:'bom.xlsx',dataUrl:`data:application/octet-stream;base64,${bytes.toString('base64')}`}]});
+        const chart=workbookParts();chart['xl/workbook.xml']=chart['xl/workbook.xml'].replace('state="hidden"','');chart['xl/_rels/workbook.xml.rels']=chart['xl/_rels/workbook.xml.rels'].replace(/(Id="sheet3" Type="[^"]*)worksheet/, '$1chartsheet');
+        chart['xl/worksheets/sheet3.xml']='<chartsheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>';
+        await fs.writeFile(path.join(directory,'包含图表页.xlsx'),zip(chart));
+        const failed=workbookParts();failed['xl/worksheets/sheet2.xml']='<worksheet><broken>';await fs.writeFile(path.join(directory,'工作表异常.xlsx'),zip(failed));
+        const second=workbookParts();second['xl/sharedStrings.xml']=second['xl/sharedStrings.xml'].replace('底板 &amp; 固定件','第二个工作簿');
+        const two=await service.request({action:'import',workspacePath:root,kind:'attachment',category:'物料',title:'多个工作簿',files:[{path:'first.xlsx',dataUrl:`data:application/octet-stream;base64,${bytes.toString('base64')}`},{path:'second.xlsx',dataUrl:`data:application/octet-stream;base64,${zip(second).toString('base64')}`}]});
+        res.setHeader('Content-Type','application/json');res.end(JSON.stringify({base64:bytes.toString('base64'),importedId:imported.id}));return;
+      }
+      if(route==='/test/prepare-memory' && req.method==='POST'){
+        const chunks=[];for await(const chunk of req)chunks.push(chunk);
+        const input=JSON.parse(Buffer.concat(chunks).toString());
+        const notices=[];
+        const prepared=await handlers.before_agent_start({prompt:input.query || '',systemPrompt:'TEST BASE'},
+          {cwd:root,sessionManager:{getSessionId:()=>input.sessionId || 'overview-flow'},ui:{notify:(message)=>notices.push(message)}});
+        res.setHeader('Content-Type','application/json');res.end(JSON.stringify({prepared,notices}));return;
+      }
+      if(route==='/test/fail-memory' && req.method==='POST'){
+        const chunks=[];for await(const chunk of req)chunks.push(chunk);
+        failMemory=JSON.parse(Buffer.concat(chunks).toString()).enabled===true;
+        res.setHeader('Content-Type','application/json');res.end(JSON.stringify({enabled:failMemory}));return;
+      }
+      if(route==='/test/markdown-fixture' && req.method==='POST'){
+        const directory=path.join(root,'.bone-project-wiki/knowledge/产品说明');
+        const content='# Raw handbook\n\nA **formatted** ordinary Markdown file.\n\n| Item | Result |\n| --- | --- |\n| Read | Ready |\n';
+        await fs.mkdir(directory,{recursive:true});
+        await fs.writeFile(path.join(directory,'raw-handbook.md'),content);
+        res.setHeader('Content-Type','application/json');res.end(JSON.stringify({content}));return;
+      }
+      if(route==='/test/html-fixture' && req.method==='POST'){
+        const directory=path.join(root,'.bone-project-wiki/knowledge/产品设计');
+        await fs.mkdir(path.join(directory,'assets'),{recursive:true});
+        const source='<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="assets/style.css"></head><body><main><h1>完整产品与交互文档</h1><p>Full document surface with local styles and interactions.</p><button id="switch" onclick="this.textContent=\'已切换\'">切换页面</button><img alt="本地图片" src="assets/pixel.png"><div style="height:1600px"></div><button onclick="this.textContent=\'End reached\'">Page end</button></main><script src="assets/app.js"></script><script>try{parent.document.body.dataset.previewEscaped="yes"}catch{};fetch("https://example.invalid/preview-network").catch(()=>{document.body.dataset.networkBlocked="yes"})</script></body></html>';
+        await fs.writeFile(path.join(directory,'完整产品与交互文档.html'),source);
+        await fs.writeFile(path.join(directory,'assets/style.css'),'body{margin:0;background:#172128;color:#e5edf1;font:16px/1.7 system-ui}main{padding:40px}h1{color:rgb(12, 80, 120);margin:0 0 16px}p{color:#b3c2cb}button{padding:10px 18px;border:1px solid #617986;background:#26353f;color:inherit;border-radius:6px}');
+        await fs.writeFile(path.join(directory,'assets/app.js'),'document.body.dataset.localScript="loaded"');
+        await fs.writeFile(path.join(directory,'assets/pixel.png'),Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS1sAAAAASUVORK5CYII=','base64'));
+        await fs.writeFile(path.join(directory,'missing-assets.html'),'<h1>Readable partial page</h1><script src="missing.js"></script>');
+        await service.request({action:'import',workspacePath:root,kind:'attachment',category:'产品设计',title:'Imported HTML attachment',files:[{path:'index.html',content:'<h1>Imported attachment preview</h1><button onclick="this.textContent=\'Worked\'">Try attachment</button>'}]});
+        await service.request({action:'import',workspacePath:root,kind:'prototype',category:'产品设计',title:'Full pane prototype',entryPath:'index.html',files:[{path:'index.html',content:'<h1>Full pane prototype page</h1>'}]});
+        await service.request({action:'save',workspacePath:root,kind:'document',category:'产品设计',title:'Layout check note',content:'# Markdown still has document spacing\n\nFormatted reading remains available.'});
+        res.setHeader('Content-Type','application/json');res.end(JSON.stringify({created:true}));return;
+      }
       if(route==='/call' && req.method==='POST'){
         const chunks=[];let size=0;
         for await(const chunk of req){size+=chunk.length;if(size>20*1024*1024)throw new Error('REQUEST_LIMIT');chunks.push(chunk);}
@@ -42,26 +100,30 @@ async function main() {
         if(channel==='app.getLocale')result='en';
         else if(channel==='app.getAppearance')result={base:'light',locale:'en'};
         else if(channel==='wiki')result=await service.request(input);
+        else if(channel==='wiki.search')result=await service.requestLatestSearch(input);
+        else if(channel==='wiki.search.cancel')result=await service.cancelLatestSearch(input);
+        else if(channel==='wiki.save')result=await service.saveAndSnapshot(input);
+        else if(channel==='fs.reveal'){hostActions.push({action:'reveal',path:input.path});result={revealed:true};}
         else throw new Error('UNSUPPORTED_CHANNEL');
         res.setHeader('Content-Type','application/json');res.end(JSON.stringify({result}));return;
       }
       if(route==='/test-bridge.js'){
         res.setHeader('Content-Type','text/javascript');
-        res.end(`window.pluginBridge={on(){return ()=>{};},async invoke(channel,input){const response=await fetch('/call',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channel,input})});const body=await response.json();if(body.error)throw new Error(body.error);return body.result;}};`);return;
+        res.end(`const listeners=new Map();window.wikiTestEvent=event=>listeners.get(event)?.();window.pluginBridge={on(event,listener){listeners.set(event,listener);return ()=>listeners.delete(event);},async invoke(channel,input){const response=await fetch('/call',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({channel,input})});const body=await response.json();if(body.error)throw Object.assign(new Error(body.error),{code:body.code});return body.result;}};`);return;
       }
       if(route==='/state'){
         const snapshot=await service.request({action:'snapshot'});
         const entries=[];
         const scanned=await service.scanAll(root);
         for(const section of ['knowledge','memory','development']) for(const meta of scanned[section].entries) entries.push(await service.loadRecord(meta,root));
-        res.setHeader('Content-Type','application/json');res.end(JSON.stringify({snapshot,entries}));return;
+        res.setHeader('Content-Type','application/json');res.end(JSON.stringify({snapshot,entries,hostActions}));return;
       }
       const name=path.basename(route)===''?'index.html':path.basename(route);
       if(!/\.(html|css|mjs)$/.test(name)) {res.writeHead(404);res.end();return;}
       let body=await fs.readFile(path.join(__dirname,'../renderer',name),'utf8');
       if(name==='index.html')body=body.replace('<head>','<head><script src="/test-bridge.js"></script>');
       res.setHeader('Content-Type',name.endsWith('.html')?'text/html':name.endsWith('.css')?'text/css':'text/javascript');res.end(body);
-    }catch(error){res.writeHead(400,{'Content-Type':'application/json'});res.end(JSON.stringify({error:error.message}));}
+    }catch(error){res.writeHead(400,{'Content-Type':'application/json'});res.end(JSON.stringify({error:error.message,code:error.code}));}
   });
   server.listen(Number(process.env.BONE_WIKI_TEST_PORT || 18766),'127.0.0.1');
   async function stop(){service.dispose();server.close();await fs.rm(root,{recursive:true,force:true});process.exit(0);}
