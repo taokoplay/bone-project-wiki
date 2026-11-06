@@ -108,6 +108,8 @@ Agent 保存记忆或关联文档时，可传 `scopePaths`（最多 16 个项目
 
 AI Agent 可通过 `project_wiki` 工具安全管理与检索当前项目的知识库：
 
+Start with `snapshot` to discover the current host workspace. The 0.3.5 repair restores discovery when optional arguments contain an empty or stale `workspacePath`; that hint does not select a project. Use the returned exact path for initialization, reads and saves. Real workspace changes during the operation still fail, and all non-snapshot actions keep strict path matching.
+
 ```json
 // 获取知识库快照
 { "action": "snapshot" }
