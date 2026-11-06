@@ -2,8 +2,10 @@
 const { ROOT, KNOWLEDGE_ROOT, MEMORY_ROOT, DEVELOPMENT_ROOT, SECTIONS, isKnowledgeCategory, hash, text, id, encode, decode, summarize, normalize, validateFiles, contextText, sectionForEntry, sectionRoot, recordPath, indexPath, safeFileId } = require('./core.cjs');
 const { DocumentMemories } = require('./document-memory.cjs');
 const { stableRecordId, validRecordId } = require('./document-links.cjs');
-const { normalizeScopePaths } = require('./memory-selection.cjs');
+const { MemoryViews } = require('./memory-views.cjs');
 const { HtmlPreviews } = require('./html-preview.cjs');
+const { readRecallTraces } = require('./recall-traces.cjs');
+const { forgetMemory } = require('./memory-removal.cjs');
 const escapeHtml = value => String(value).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const notFound = error => {
   const code = String(error?.code ?? error?.errorCode ?? '');
@@ -21,10 +23,11 @@ const WPS_EXTS = new Set(['wps', 'wpt', 'et', 'ett', 'dps', 'dpt']);
 const INDEX_VERSION = 1;
 const LIST_PAGE = 1000;
 const RACY_WINDOW_MS = 2000;
+const MEMORY_CAPABILITIES = Object.freeze({schemaVersion:1,overview:true,explain:true,recallTraces:true,modes:Object.freeze(['automatic','manual'])});
 const META_FIELDS = ['schemaVersion','id','recordId','documentRef','documentLink','scopePaths','importance','title','category','kind','status','tags','topics','source','createdAt','updatedAt','path','revision','section'];
 const publicMeta = source => META_FIELDS.reduce((meta, key) => { if (source[key] !== undefined) meta[key] = source[key]; return meta; }, {});
 class WikiService {
-  constructor(pi) { this.pi = pi; this.queue = Promise.resolve(); this.disposed = false; this.racyWindowMs = RACY_WINDOW_MS; this.listPage = LIST_PAGE; this.documentMemories = new DocumentMemories(this); this.htmlPreviews = new HtmlPreviews(this); }
+  constructor(pi) { this.pi = pi; this.queue = Promise.resolve(); this.disposed = false; this.racyWindowMs = RACY_WINDOW_MS; this.listPage = LIST_PAGE; this.documentMemories = new DocumentMemories(this); this.htmlPreviews = new HtmlPreviews(this); this.memoryViews = new MemoryViews(this); }
   dispose() { this.disposed = true; }
   async workspace(expected) {
     if (this.disposed) throw new Error('PLUGIN_UNLOADED');
@@ -222,7 +225,7 @@ class WikiService {
     if (raw !== null && JSON.parse(raw).schemaVersion !== 1) throw new Error('UNSUPPORTED_PROJECT_VERSION');
     if (raw === null) {
       const emptySections = { knowledge: { categories: [], entries: [], corrupted: [] }, memory: { entries: [], corrupted: [] }, development: { entries: [], corrupted: [] } };
-      return { workspacePath: workspace.path, projectName: workspace.name, initialized: false, entries: [], corrupted: [], sections: emptySections };
+      return { workspacePath: workspace.path, projectName: workspace.name, initialized: false, entries: [], corrupted: [], sections: emptySections, memoryCapabilities:MEMORY_CAPABILITIES };
     }
     const scanned = await this.scanAll(workspace.path);
     const memories = await this.documentMemories.projectRows(scanned.memory.entries, scanned.knowledge.rows, workspace.path);
@@ -231,7 +234,7 @@ class WikiService {
       memory: { entries: memories.map(summarize), corrupted: scanned.memory.corrupted },
       development: { entries: scanned.development.entries.map(summarize), corrupted: scanned.development.corrupted },
     };
-    return { workspacePath: workspace.path, projectName: workspace.name, initialized: true, entries: [...sections.knowledge.entries, ...sections.memory.entries, ...sections.development.entries], corrupted: [...sections.knowledge.corrupted, ...sections.memory.corrupted, ...sections.development.corrupted], sections };
+    return { workspacePath: workspace.path, projectName: workspace.name, initialized: true, entries: [...sections.knowledge.entries, ...sections.memory.entries, ...sections.development.entries], corrupted: [...sections.knowledge.corrupted, ...sections.memory.corrupted, ...sections.development.corrupted], sections, memoryCapabilities:MEMORY_CAPABILITIES };
   }
   async initialized(workspacePath) {
     const raw = await this.exists(`${ROOT}/project.json`, workspacePath);
@@ -353,18 +356,7 @@ class WikiService {
     }
     return results.filter(entry => !terms.length || entry.score > 0).sort((a, b) => b.score - a.score).slice(0, 80);
   }
-  async context(input) {
-    const scanned = await this.scanAll(input.workspacePath); const entries = SECTIONS.flatMap(section => scanned[section].entries);
-    if (input.since !== undefined) { const since = Date.parse(String(input.since)); if (!Number.isFinite(since)) throw new Error('INVALID_SINCE: use an ISO timestamp'); return { since:new Date(since).toISOString(), count:entries.filter(entry => Date.parse(entry.updatedAt) > since).length, changed:entries.filter(entry => Date.parse(entry.updatedAt) > since) }; }
-    const query = text(input.query || '', 'query', 32000);
-    const paths = normalizeScopePaths(input.paths);
-    const loaded = await this.documentMemories.projectRows(scanned.memory.entries, scanned.knowledge.rows, input.workspacePath, { readBodies: true });
-    const wanted = entries.filter(entry => entry.kind !== 'memory' && entry.category !== 'memory' && entry.status !== 'archived'
-      && (entry.kind === 'handoff' || entry.category === 'overview' || (query && `${entry.title} ${entry.topics.join(' ')}`.toLowerCase().includes(query.toLowerCase()))))
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 16);
-    for (const meta of wanted) { try { loaded.push(await this.loadRecord(meta, input.workspacePath)); } catch { /* changed under us */ } }
-    return { text: contextText(loaded, query, { paths }) };
-  }
+  async context(input) { return this.memoryViews.context(input); }
   async preferencesGet() { const settings = await this.pi.plugin.getSettings(); const content = typeof settings.personalPreferences === 'string' ? settings.personalPreferences : ''; return { content, revision:hash(content) }; }
   async exportHtml(input) {
     const scanned = await this.scan('knowledge', input.workspacePath); if (scanned.corrupted.length) throw new Error(`LIBRARY_CORRUPTED: ${scanned.corrupted.length} knowledge record(s) could not be parsed`);
@@ -397,6 +389,7 @@ class WikiService {
     await this.initialized(input.workspacePath);
     const entry = await this.read(input);
     if (input.expectedRevision && entry.revision !== input.expectedRevision) throw new Error('REVISION_CONFLICT');
+    if (entry.kind === 'memory') return {...await forgetMemory(this,{...input,expectedRevision:input.expectedRevision || entry.revision}),id:entry.id};
     await this.workspace(input.workspacePath);
     try {
       await this.pi.fs.remove(entry.path);
@@ -481,11 +474,13 @@ class WikiService {
       case 'import': return this.importFiles(input);
       case 'search': return this.search(input);
       case 'context': return this.context(input);
+      case 'memoryOverview': return this.memoryViews.overview(input);
+      case 'memoryTraces': return readRecallTraces(this.pi,input.workspacePath);
       case 'export': return this.exportHtml(input);
       case 'reindex': { const sections = {}; for (const section of SECTIONS) { const scan = await this.scan(section, input.workspacePath, { reindex:true }); sections[section] = { records:scan.entries.length, corrupted:scan.corrupted.length }; } return { sections }; }
       case 'preferencesGet': return this.preferencesGet();
       case 'preferencesSave': { const current = await this.preferencesGet(); if (current.revision !== input.expectedRevision) throw new Error('REVISION_CONFLICT'); const content = text(input.content, 'preferences', 10000); await this.workspace(input.workspacePath); await this.pi.plugin.setSettings({ personalPreferences:content }); return { content, revision:hash(content) }; }
-      case 'forget': { const entry = await this.read({ ...input, section:'memory' }); if (entry.kind !== 'memory') throw new Error('ONLY_MEMORY_CAN_BE_FORGOTTEN'); if (entry.revision !== input.expectedRevision) throw new Error('REVISION_CONFLICT'); await this.workspace(input.workspacePath); await this.pi.fs.remove(entry.path); if (await this.exists(entry.path, input.workspacePath) !== null) throw new Error(`DELETE_VERIFY_FAILED: ${entry.path} is still present`); await this.forgetIndexRow('memory', input.workspacePath, entry.path); return { deleted:true }; }
+      case 'forget': return forgetMemory(this,input);
       case 'move': return this.move(input);
       case 'delete': return this.deleteRecord(input);
       case 'reveal': return this.reveal(input);

@@ -1,6 +1,6 @@
 # Document-linked project memory
 
-Status: implementation candidate, 0.2.0. The feature adds a backward-compatible document-memory workflow; it does not change host permissions or introduce an external model call.
+状态：文档关联流程自 0.2.0 提供；0.3.1 包含阶段 A 的只读总览与召回解释，不改变记录所有权或宿主权限，不调用外部模型。
 
 ## Ownership
 
@@ -67,3 +67,9 @@ Task selection and candidate isolation are specified in [Task-relevant memory re
 - Name an unrelated file after a source's stable identity; reject ambiguous legacy lookup and resolve the explicit `recordId` selector correctly.
 - Keep private source titles out of persisted/projected memory and automatic context, including after a source rename.
 - Preserve unsent summary input through focus refresh and source autosave; isolate copied identities across projects and guard unsaved departures.
+
+## 阶段 A 的总览与诊断
+
+`memoryOverview` 派生现有记录的分组、确认状态、完整范围、来源状态及读取条件。来源当前且完整可用时才显示短事实；旧摘要无法核验时仅保留状态和读取入口，不沿用缓存事实，不在读取时迁移或确认记录。主总览不成为另一份可编辑规则。
+
+`context(explain: true)` 解释实际最终提供的事实、全文入口或省略；通过 `memoryMode` 明确自动或手动预算。`memoryTraces` 仅返回受限的自动准备诊断，不能证明模型已消费。关联记忆被遗忘时先清理相关诊断引用；源文档继续由知识库拥有，不随遗忘删除。详见[任务记忆与召回解释](memory-retrieval.md)和[阶段 A 契约](memory-phase-a-contract.md)。

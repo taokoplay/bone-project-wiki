@@ -6,11 +6,13 @@ import { memoryFields } from './memory-fields.mjs';
 import { htmlPreview } from './html-preview.mjs';
 import { noteReader } from './note-reader.mjs';
 import { watchFocusRefresh } from './focus-refresh.mjs';
+import { createMemoryOverview } from './memory-overview.mjs';
+import { createSidebarToggle } from './sidebar.mjs';
 
-const bridge = window.pluginBridge;
+const bridge = window.pluginBridge, sidebar = createSidebarToggle(t, closeAnyControl);
 const app = document.querySelector('#app');
 const state = { snapshot: null, section: 'knowledge', category: '', topic: '', query: '', results: null, entry: null, mode: 'read', dirty: false, stale: false, busy: false, epoch: 0, view: 0, search: 0, memoryDraft: null };
-let detail, records, notice, searchTimer, editorDialog;
+let detail, records, notice, searchTimer, editorDialog, overviewView;
 const sectionEntries = section => { const snapshotEntries = state.snapshot?.entries || []; if (section === 'memory') return state.snapshot?.sections ? [...(state.snapshot.sections.memory?.entries || []), ...(state.snapshot.sections.development?.entries || [])] : snapshotEntries.filter(entry => entry.kind === 'memory' || entry.category === 'memory' || entry.kind === 'handoff' || entry.category === 'development'); if (section === 'knowledge') return state.snapshot?.sections?.knowledge?.entries || snapshotEntries.filter(entry => entry.kind !== 'memory' && entry.category !== 'memory' && entry.kind !== 'handoff' && entry.category !== 'development'); return state.snapshot?.sections?.[section]?.entries || []; };
 const knowledgeCategories = () => {
   const listed = state.snapshot?.sections?.knowledge?.categories;
@@ -130,7 +132,7 @@ function renderShell() {
   editorDialog = null;
   const header = element('header');
   const identity = element('div', undefined, 'identity');
-  identity.append(element('h1', t('library')));
+  identity.append(sidebar.button, element('h1', t('library')));
   const tools = element('div', undefined, 'tools');
   if (state.snapshot?.initialized) {
     const tabs = element('div', undefined, 'section-tabs');
@@ -153,7 +155,7 @@ function renderShell() {
   header.append(identity, tools);
   notice = element('div', undefined, 'notice'); notice.setAttribute('aria-live', 'polite');
   const shell = element('div', undefined, 'shell');
-  const library = element('section', undefined, 'library'); library.setAttribute('aria-label', t('all'));
+  const library = element('section', undefined, 'library'); library.setAttribute('aria-label', t('all')); sidebar.attach(shell, library);
   const sidebarHeader = element('div', undefined, 'sidebar-header');
   const vaultTitle = element('div', t('fileExplorer') || '文件', 'sidebar-vault-title');
   const sidebarTools = element('div', undefined, 'sidebar-tools');
@@ -445,12 +447,28 @@ async function refresh() {
   }
 }
 function renderDetail() {
+  overviewView = null;
   const snapshot = state.snapshot;
   if (!snapshot?.workspacePath) { empty(detail, 'library', 'noWorkspace'); return; }
   if (!snapshot.initialized) {
     empty(detail, 'library', 'initBody', mutation(button('init', () => perform(async epoch => {
       state.snapshot = await request('init', {}, epoch); renderShell(); renderList(); renderDetail(); message(t('initialized'));
     }), true))); lock(); return;
+  }
+  if (!state.entry && state.section === 'memory' && state.mode !== 'edit' && snapshot.memoryCapabilities?.overview) {
+    const epoch = state.epoch, view = state.view;
+    const current = () => active(epoch) && view === state.view && state.section === 'memory' && !state.stale;
+    overviewView = createMemoryOverview(t, {
+      load:(action,payload={})=>request(action,payload,epoch), isCurrent:current,
+      onOpenMemory:id=>{ if (current()&&leave()) void openRecord({id,section:'memory'}); },
+      onOpenSource:recordId=>{
+        if (!current()||!leave()) return;
+        state.section='knowledge'; state.category=''; state.query=''; state.results=null;
+        renderShell(); renderList(); void openRecord({recordId,section:'knowledge'});
+      },
+      onNew:()=>{ if (current()&&leave()) { state.view++; state.mode='edit'; state.entry=null; renderDetail(); detail.querySelector('[name="title"]')?.focus(); } }
+    });
+    detail.replaceChildren(overviewView.element); return;
   }
   if (!state.entry || ['document', 'memory', 'handoff'].includes(state.entry.kind)) {
     if (!state.entry || (state.mode === 'edit' && !state.entry.documentRef)) {
@@ -470,6 +488,13 @@ function renderDetail() {
         },
         onForget: () => forgetMemory(entry)
       }));
+      if (state.section === 'memory' && snapshot.memoryCapabilities?.overview) {
+        const back = button('memoryOverviewTitle',()=>{
+          if (!leave()) return;
+          state.view++; state.entry=null; state.mode='read'; renderList(); renderDetail();
+        });
+        detail.querySelector('.note-mode-bar')?.prepend(back);
+      }
       appendDocumentMemory(entry); lock();
     }
     return;
@@ -1166,6 +1191,7 @@ async function start() {
       if (entry !== undefined) state.entry = entry;
       if (state.results === null) renderList();
       if (entry !== undefined) renderDetail();
+      else if (overviewView?.element.isConnected) void overviewView.refresh();
     }
   });
   renderShell(); empty(detail, 'loading', 'pending');

@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import core from '../core.cjs';
 import links from '../document-links.cjs';
+import traceApi from '../recall-traces.cjs';
 
 const { normalize, encode, decode, recordPath } = core;
 const { stableRecordId, documentContentHash } = links;
@@ -98,9 +99,19 @@ try {
   assert.doesNotMatch(paymentTask, /Candidate refunds|Export image/);
   const accountTask = await runner.emitBeforeAgentStart('Implement apps/accounts/refund.ts', 'BASE');
   assert.doesNotMatch(accountTask, /Refund authorization requires a settled payment/);
+  const traceRoot=path.join(project,traceApi.TRACE_ROOT);
+  const traceFiles=await fs.readdir(traceRoot);
+  assert.ok(traceFiles.length>0&&traceFiles.length<=traceApi.TRACE_LIMIT);
+  const prepared=await Promise.all(traceFiles.map(async name=>{
+    const raw=await fs.readFile(path.join(traceRoot,name),'utf8');
+    assert.ok(Buffer.byteLength(raw)<=traceApi.TRACE_MAX_BYTES);
+    assert.doesNotMatch(raw,/Candidate refunds|Refund authorization requires|Implement apps|Current release process/);
+    const trace=JSON.parse(raw);assert.equal(traceApi.validateRecallTrace(trace),true);return trace;
+  }));
+  assert.ok(prepared.some(trace=>trace.contextHash===core.hash(accountTask.slice('BASE\n\n'.length))));
   assert.equal(runner.getDiagnostics().length, 0, JSON.stringify(runner.getDiagnostics()));
   assert.equal(notices.length, 0, JSON.stringify(notices));
-  console.log('PASS: real extension loader, contextual guidance, settled fact write, cancellation/error cleanup, reload, moved/stale document links, task relevance, scoped core memory and candidate isolation (offline fixture).');
+  console.log('PASS: real extension loader, contextual guidance, settled fact write, cancellation/error cleanup, reload, moved/stale document links, task relevance, scoped core memory, candidate isolation and bounded private preparation traces (offline fixture).');
 } finally {
   if (runner) await runner.dispose();
   await fs.rm(project, { recursive: true, force: true });

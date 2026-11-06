@@ -520,3 +520,57 @@ test('cancellation during an automatic write leaves no saved record or temporary
   await assert.rejects(saveAutomaticMemories(f.cwd, [{ content: 'I prefer a concise release review.' }], controller.signal), { name: 'AbortError' });
   assert.deepEqual(await fs.readdir(path.join(f.cwd, MEMORY_ROOT)), []);
 });
+
+async function heldPreparation(t) {
+  const f=await fixture(t);
+  const entry=await writeEntry(f.cwd,normalize({kind:'memory',category:'memory',status:'confirmed',title:'Existing rule',content:'Keep review evidence.'}));
+  await writeIndex(f.cwd,'memory',[entry]);
+  let release, entered, held=false;
+  const blocked=new Promise(resolve=>{release=resolve;});
+  const ready=new Promise(resolve=>{entered=resolve;});
+  const open=fs.open;
+  t.mock.method(fs,'open',async (...args)=>{
+    if(!held&&args[0]===path.join(f.cwd,MEMORY_ROOT,'index.json')) {held=true;entered();await blocked;}
+    return open(...args);
+  });
+  t.after(()=>release());
+  return {...f,ready,release};
+}
+
+test('invalidated preparations discard only their pending memory and produce no trace', async t => {
+  for(const change of ['workspace','session','cancel']) await t.test(change,async t=>{
+    const f=await heldPreparation(t), controller=new AbortController();
+    let session='session-a';
+    const ctx={...f.context(),sessionManager:{getSessionId:()=>session},signal:controller.signal};
+    const pending=start(f,'请记住：本轮未完成约定不应保存',ctx);
+    await f.ready;
+    if(change==='workspace') ctx.cwd=(await fixture(t)).cwd;
+    if(change==='session') session='session-b';
+    if(change==='cancel') controller.abort();
+    f.release();
+    assert.equal(await pending,undefined);
+    await settle(f,f.context());
+    assert.deepEqual((await f.memories()).map(row=>row.content),['Keep review evidence.']);
+    await assert.rejects(fs.access(path.join(f.cwd,MEMORY_ROOT,'recall-traces')),{code:'ENOENT'});
+  });
+});
+
+test('a late preparation cannot discard a newer same-session memory candidate', async t=>{
+  const f=await heldPreparation(t);
+  const previous=start(f,'请记住：旧一轮约定');
+  await f.ready;
+  assert.match((await start(f,'请记住：新一轮约定')).systemPrompt,/automatic project memory/);
+  f.release();assert.equal(await previous,undefined);
+  await settle(f);
+  assert.deepEqual(new Set((await f.memories()).map(row=>row.content)),new Set(['Keep review evidence.','新一轮约定']));
+});
+
+test('diagnostic write failure warns with a code and preserves prepared context', async t=>{
+  const f=await fixture(t);
+  await writeEntry(f.cwd,normalize({kind:'memory',category:'memory',status:'confirmed',title:'Existing rule',content:'Keep review evidence.'}));
+  await fs.writeFile(path.join(f.cwd,MEMORY_ROOT,'recall-traces'),'occupied');
+  const expected=await readProjectContext(f.cwd,{query:'Continue review'});
+  assert.equal((await start(f,'Continue review')).systemPrompt,`BASE\n\n${expected}`);
+  assert.ok(f.notices.some(row=>row.level==='warning'&&/diagnostics were not saved \([A-Z_]+\)/.test(row.message)));
+  assert.equal(await fs.readFile(path.join(f.cwd,MEMORY_ROOT,'recall-traces'),'utf8'),'occupied');
+});

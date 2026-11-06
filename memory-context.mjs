@@ -1,50 +1,19 @@
 import fs from 'node:fs/promises';
-import { constants } from 'node:fs';
+import { safeDirectory, readSafe, sameFile, missing } from './memory-files.mjs';
 import path from 'node:path';
 import core from './core.cjs';
 import policy from './memory-policy.cjs';
+import presentation from './memory-presentation.cjs';
+import overview from './memory-overview.cjs';
 
-const { ROOT, MEMORY_ROOT, KNOWLEDGE_ROOT, decode, encode, normalize, recordPath, hash, contextIndex, relative, isKnowledgeCategory } = core;
+const { ROOT, MEMORY_ROOT, KNOWLEDGE_ROOT, decode, encode, normalize, recordPath, hash, relative, isKnowledgeCategory } = core;
 const { MEMORY_CONTENT_LIMIT, normalizedText, sensitiveMemory, usableMemory, memoryRequest } = policy;
+const { contextIndexResult } = presentation;
+const { unavailableMemory } = overview;
 const RECORD_PATH = new RegExp(`^\\${ROOT}/memory/[a-z0-9-]+\\.md$`);
 const RECORD_LIMIT = 256000;
 const INDEX_LIMIT = 4 * 1024 * 1024;
 const LIBRARY_LIMIT = 48 * 1024 * 1024;
-const sameFile = (a, b) => a.ino === b.ino && a.dev === b.dev;
-const missing = error => error?.code === 'ENOENT';
-
-async function safeDirectory(base, name) {
-  relative(name);
-  if (name !== ROOT && !name.startsWith(`${ROOT}/`)) throw new Error('UNSAFE_CONTEXT_PATH');
-  let info;
-  const parts = name.split('/');
-  for (let i = 1; i <= parts.length; i += 1) {
-    info = await fs.lstat(path.join(base, ...parts.slice(0, i)));
-    if (info.isSymbolicLink() || !info.isDirectory()) throw new Error(i === 1 ? 'UNSAFE_WIKI_ROOT' : 'UNSAFE_CONTEXT_DIRECTORY');
-  }
-  return info;
-}
-
-async function readSafe(base, name, limit) {
-  relative(name);
-  const parent = path.posix.dirname(name);
-  const directoryInfo = await safeDirectory(base, parent);
-  const filename = path.join(base, name);
-  const info = await fs.lstat(filename);
-  if (info.isSymbolicLink() || !info.isFile() || info.size > limit) throw new Error('UNSAFE_CONTEXT_FILE');
-  const handle = await fs.open(filename, constants.O_RDONLY | constants.O_NOFOLLOW);
-  try {
-    const actual = await handle.stat();
-    if (!actual.isFile() || !sameFile(actual, info) || actual.size > limit) throw new Error('CONTEXT_CHANGED');
-    const buffer = Buffer.alloc(limit + 1);
-    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-    if (bytesRead > limit) throw new Error('CONTEXT_FILE_LIMIT');
-    const after = await handle.stat();
-    if (bytesRead !== actual.size || !sameFile(after, actual) || after.size !== actual.size || after.mtimeMs !== actual.mtimeMs
-      || !sameFile(directoryInfo, await safeDirectory(base, parent))) throw new Error('CONTEXT_CHANGED');
-    return buffer.subarray(0, bytesRead).toString('utf8');
-  } finally { await handle.close(); }
-}
 
 async function readMemoryIndex(base) {
   try {
@@ -71,17 +40,17 @@ async function readMemoryIndex(base) {
   }
 }
 
-async function readMemoryRecords(base, reads) {
+async function readMemoryRecords(base, reads, failures = []) {
   let info;
   try { info = await safeDirectory(base, MEMORY_ROOT); } catch (error) { if (missing(error)) return []; throw error; }
   const files = await fs.readdir(path.join(base, MEMORY_ROOT), { withFileTypes: true });
-  if (files.length > 500) throw new Error('CONTEXT_DIRECTORY_LIMIT');
+  if (files.filter(file=>file.name!=='recall-traces'||!file.isDirectory()).length > 500) throw new Error('CONTEXT_DIRECTORY_LIMIT');
   if (!sameFile(info, await safeDirectory(base, MEMORY_ROOT))) throw new Error('CONTEXT_CHANGED');
   const rows = files.filter(file => file.isFile() && /^[a-z0-9-]+\.md$/.test(file.name)).map(file => ({ path: `${MEMORY_ROOT}/${file.name}` }));
-  return readMemoryRows(base, rows, reads);
+  return readMemoryRows(base, rows, reads, failures);
 }
 
-async function readMemoryRows(base, rows, reads) {
+async function readMemoryRows(base, rows, reads, failures = []) {
   const entries = []; let bytes = 0;
   for (const row of rows) {
     try {
@@ -93,6 +62,7 @@ async function readMemoryRows(base, rows, reads) {
     } catch (error) {
       if (error.message === 'CONTEXT_LIBRARY_LIMIT') throw error;
       // A failed body read never promotes cached fields into a fact or scope.
+      failures.push(unavailableMemory({ id:row.id || path.posix.basename(row.path,'.md'), path:row.path }));
     }
   }
   return entries;
@@ -206,19 +176,36 @@ async function projectLinkedMemories(base, memories, reads) {
   });
 }
 
+export async function memoryReferencesPresent(cwd, references) {
+  if (!Array.isArray(references) || references.length > 2000 || references.some(name=>typeof name !== 'string' || !RECORD_PATH.test(name))) return false;
+  if (!references.length) return true;
+  try {
+    const before = await safeDirectory(cwd,MEMORY_ROOT);
+    for (const name of references) {
+      const info = await fs.lstat(path.join(cwd,name));
+      if (!info.isFile() || info.isSymbolicLink()) return false;
+    }
+    return sameFile(before,await safeDirectory(cwd,MEMORY_ROOT));
+  } catch (error) { if (missing(error)) return false; throw error; }
+}
+
 export async function readProjectContextStats(cwd, options = {}) {
   const reads = { index: 0, records: 0 };
   if (typeof cwd !== 'string' || !path.isAbsolute(cwd)) return { text: null, reads };
   try { await safeDirectory(cwd, ROOT); } catch (error) { if (missing(error)) return { text: null, reads }; throw error; }
   const indexed = await readMemoryIndex(cwd);
+  const failures = [];
   let entries;
   if (indexed) {
     reads.index = 1;
-    // Index rows locate records; actual bodies decide scope, status and relevance.
-    entries = await readMemoryRows(cwd, indexed, reads);
-  } else entries = await readMemoryRecords(cwd, reads);
-  const memories = entries.filter(entry => entry.status === 'confirmed' && usableMemory(entry));
-  return { text: contextIndex(await projectLinkedMemories(cwd, memories, reads), options), reads };
+    entries = await readMemoryRows(cwd,indexed,reads,failures);
+  } else entries = await readMemoryRecords(cwd,reads,failures);
+  const memories = entries.filter(entry=>entry.status==='confirmed'&&usableMemory(entry));
+  const included = new Set(memories);
+  const projected = await projectLinkedMemories(cwd,memories,reads);
+  const diagnosticEntries = [...projected,...entries.filter(entry=>!included.has(entry)),...failures];
+  const result = contextIndexResult(projected,{...options,diagnosticEntries});
+  return {text:result.text,reads,...(options.explain ? {explanation:result.explanation,references:diagnosticEntries.map(entry=>entry.path)} : {})};
 }
 
 export async function readProjectContext(cwd, options = {}) { return (await readProjectContextStats(cwd, options)).text; }

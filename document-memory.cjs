@@ -3,6 +3,7 @@ const { decode, text } = require('./core.cjs');
 const { stableRecordId, documentContentHash, projectDocumentMemory } = require('./document-links.cjs');
 const { usableMemory, memoryTitle } = require('./memory-policy.cjs');
 const { normalizeMemoryMetadata } = require('./memory-selection.cjs');
+const { unavailableMemory } = require('./memory-overview.cjs');
 const changedWorkspace = error => /WORKSPACE_CHANGED|PLUGIN_UNLOADED|LOCAL_PROJECT_REQUIRED/.test(String(error?.message || error));
 class DocumentMemories {
   constructor(service) { this.service = service; }
@@ -27,24 +28,30 @@ class DocumentMemories {
     const source = await this.documents(new Set([entry.documentRef.recordId]), workspacePath);
     return projectDocumentMemory(entry, source.documents, source.unreadable);
   }
-  async projectRows(rows, metadata, workspacePath, { readBodies = false } = {}) {
+  async projectRows(rows, metadata, workspacePath, { readBodies = false, includeUnreadable = false, automaticOnly = false } = {}) {
     if (!readBodies && !rows.some(row => row.documentRef)) return rows;
     const loaded = []; const failed = new Set();
     for (const row of rows) {
       if (!readBodies && !row.documentRef) { loaded.push(row); continue; }
-      try { loaded.push(decode(await this.service.readFile(row.path, workspacePath), row.path)); }
+      try {
+        const entry = decode(await this.service.readFile(row.path, workspacePath), row.path);
+        if (includeUnreadable) entry.automaticEligible = entry.status === 'confirmed' && usableMemory(entry);
+        loaded.push(entry);
+      }
       catch (error) {
         if (changedWorkspace(error)) throw error;
+        if (includeUnreadable) { loaded.push(unavailableMemory(row)); continue; }
         if (!readBodies && row.documentRef) {
           const unavailable = { ...row, content: '', documentLink: { state: 'unreadable', recordId: row.documentRef.recordId, readWhen: row.documentRef.readWhen } };
           loaded.push(unavailable); failed.add(unavailable);
         }
       }
     }
-    const ids = new Set(loaded.filter(row => row.documentRef && !failed.has(row)).map(row => row.documentRef.recordId));
+    const canProject = row => row.documentRef && !failed.has(row) && (!automaticOnly || row.automaticEligible);
+    const ids = new Set(loaded.filter(canProject).map(row => row.documentRef.recordId));
     if (!ids.size) return loaded;
     const source = await this.documents(ids, workspacePath, metadata);
-    return loaded.map(row => !row.documentRef || failed.has(row) ? row : projectDocumentMemory(row, source.documents, source.unreadable));
+    return loaded.map(row => canProject(row) ? projectDocumentMemory(row, source.documents, source.unreadable) : row);
   }
   async remember(input) {
     const summary = text(input.summary, 'summary', 800).trim();

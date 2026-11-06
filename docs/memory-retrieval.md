@@ -1,50 +1,73 @@
-# Task-relevant memory retrieval
+# 任务记忆与召回解释
 
-Status: implementation candidate, included in 0.2.0. This stage improves memory selection and establishes candidate isolation. It does not add a model call, embedding store, background extraction service, cross-project memory, or a new permission.
+状态：任务选择和候选隔离自 0.2.0 提供；阶段 A 的只读总览、实际呈现解释和受限准备诊断在 0.3.0 本地验收后合并到 0.3.1。不包括阶段 B/C 的替代、合并、恢复或语义提炼。
 
-## Ownership and compatibility
+## 所有权与兼容性
 
-Topic documents remain authoritative for full rules. Memory records hold confirmed summaries, provenance and optional applicability metadata. Task checkpoints remain a host/session responsibility. Existing version-1 records remain readable with project-wide scope and normal priority when the new fields are absent. Reads do not migrate or rewrite existing data.
+主题文档拥有完整规则、范围、例外与证据；关联记忆拥有已确认短摘要、读取条件与来源引用。独立短偏好可由其记忆记录维护。总览只从现有记录派生，不维护另一份可编辑规则。任务检查点仍归宿主与会话管理。
 
-Two optional memory-only fields are persisted and validated on reads and writes:
+版本 1 记录继续可读；缺少新字段表示当前项目范围、普通优先级。读取不迁移或批量改写原文，不自动确认草稿，不改变现有 `recordId`、中文文件名、文档关联或权限。
 
-- `scopePaths`: up to 16 unique project-relative file or directory paths, each at most 240 characters. An absent or empty list applies across the current project. Absolute paths, backslashes, controls, empty segments, dot traversal and sensitive locations are rejected.
-- `importance`: `normal` or `core`. Omitted values preserve existing metadata on update and mean normal priority for legacy records.
+两个可选的记忆字段在读写时核验：
 
-The same fields may be passed to `remember`; they apply to the linked memory, not its document. Invalid metadata is rejected before either record is written. Omitted fields preserve the existing memory's policy; an empty scope list explicitly clears restrictions.
+- `scopePaths`：最多 16 个不重复的项目相对文件或目录路径，每个最多 240 字符。缺失或空数组表示当前项目；拒绝绝对路径、反斜杠、控制字符、空段、点路径跳转及敏感位置。
+- `importance`：`normal` 或 `core`。更新时省略会保留原值，旧记录缺省为普通优先级。
 
-## Eligibility and selection
+`remember` 也接受这些字段，仅应用于关联记忆。无效元数据在写入文档前拒绝，更新省略不扩大原有范围，空数组才显式清除范围。
 
-Automatic and manual context use the same pure selection module. Only confirmed, non-sensitive factual memory records are eligible. Drafts are candidates: they remain visible and explicitly readable in the library, but neither their facts nor their routes enter context. Archived records are excluded. Existing document-link freshness checks still withhold summaries of stale, draft, archived, missing, unreadable or ambiguous sources; eligible non-current links may supply their status and current source route without old facts.
+## 资格、排序与完整呈现
 
-Project membership follows the current workspace's memory directory. Restricted records require a matching project-relative task path, either named in the automatic prompt or supplied through `context.paths`. Matching is exact or a directory descendant, not a string prefix; `apps/payments-other` does not match `apps/payments`. Absolute and remote paths do not establish project-relative scope. Missing path evidence excludes restricted memories conservatively.
+自动和手动上下文共用纯选择与呈现逻辑。仅已确认、非敏感、具有具体事实的记忆参与召回；草稿保留在资料库和显式读取中，其事实及读取入口均不进入上下文，归档也排除。来源正文不是当前状态时，旧摘要不进入排序与输出；符合资格的关联可以提供状态和原文读取入口。
 
-Selection reads actual memory bodies within existing directory, record and aggregate byte limits. Cached metadata is only a locator and never establishes confirmation, scope or priority. Failed body reads cannot provide cached facts. Memory records beyond the previous newest-eight cutoff can now compete for relevance. Ordinary memories do not cause knowledge-document reads.
+项目归属取当前工作区。有限定范围的记录要求任务明确出现匹配的项目相对路径，自动模式从当前提示识别，手动还可传 `context.paths`。匹配为完整路径或目录后代；`apps/payments-other` 不匹配 `apps/payments`。绝对地址、URL 中的相对外观后缀和缺失的路径证据均不能建立范围。明确出现的根目录 `package.json`、`Makefile` 等可以匹配其精确范围。
 
-The selector extracts bounded English identifiers and Chinese adjacent-character terms from the current query, excluding generic task words. Title, reading trigger and topics carry more weight than body matches. At most two applicable core memories are reserved first; the remaining records rank by lexical relevance, recency and a deterministic identity tie-break. Generic continuation requests without useful terms fall back to recency. Specific queries omit unrelated ordinary records. This is lexical retrieval, not semantic understanding; synonyms and omitted paths may require an explicit search or a clearer task query.
+实际记忆正文在已有目录、单文件与总字节上限内读取核验。索引只能定位，不能替代确认状态、范围、优先级或事实；正文读取失败时不沿用缓存事实与策略。普通短记忆不引起无关知识文档读取；关联记忆核验实际来源身份与正文，大小和修改时间相同也不能掩盖身份冲突。
 
-## Complete facts and budgets
+选择器从当前查询中提取有界的英文标识符与中文相邻词项，排除通用任务词。标题、读取条件、主题比正文匹配权重高；最多先保留两条适用的核心规则，其余按关键词相关性、时间及稳定身份排序。相关旧规则可优先于较新无关记录，不再限于最新八条。泛指继续时回退到近期记忆，具体查询省略无关普通记录。这是本地关键词检索，同义词、隐含任务或未写明的路径仍可能需要显式搜索。
 
-Automatic context remains bounded to 1,200 characters and at most six selected memory entries. The existing 180-character per-body limit now decides whether to include the entire normalized body. No fact is sliced to fit. Scope and reading conditions must fit in full alongside an included fact. When either the per-body or total budget prevents a complete entry, the formatter emits only a full-read route; it does not reuse an automatically derived title that could itself contain an incomplete claim. If even the route cannot fit, the entry is omitted.
+| 模式 | 字符预算 | 最多条目 | 单条记忆正文 | 预算范围 |
+| --- | ---: | ---: | ---: | --- |
+| automatic | 1200 | 6 | 180 | 整段自动记忆上下文 |
+| manual（默认） | 10000 | 16 | 1800 | 输出内容块及块间换行；既有提示前缀另计 |
 
-Manual context uses the same eligibility and ranking with its existing larger presentation budget. Its memory bodies are also complete or replaced by a route. Existing non-memory handoff and overview context behavior, explicit document reads, search and incremental `context.since` listings remain separate surfaces.
+预算单位为字符，不是 token。短事实、范围与读取条件完整呈现；任一部分不能完整容纳时只提供完整读取入口，不截断规则或例外，也不借自动标题重引入半句结论。入口仍不够空间时省略。手动的既有交接及概览资料行为保留，显式读取、搜索与增量元数据查询仍是独立入口。
 
-## Public entry points and panel
+## 只读动作
 
-- `save(kind: "memory", status: "draft")` stores a candidate. Confirmation is an explicit update with the current `expectedRevision`.
-- `save(kind: "memory", scopePaths, importance)` edits applicability metadata; unrelated edits preserve omitted policy fields.
-- `remember(..., scopePaths, importance)` confirms a full document and linked summary with that memory policy.
-- `context(query, paths)` supplies task terms and explicit relative task paths.
-- The extension supplies the current user prompt as the automatic query without changing turn cancellation or settled-write behavior.
+先 `snapshot` 并使用返回的当前 `workspacePath`。`snapshot.memoryCapabilities` 声明总览、解释、模式和诊断读取能力；旧快照没有能力声明时面板沿用既有流程。
 
-The existing Knowledge/Memory tabs are retained. A collapsed scope/priority editor is available for ordinary memories and in the document association form. Ordinary memory confirmation is a checkbox; unconfirmed drafts carry explanatory text. Settings autosave through the existing editor, and project-change guards disable stale controls. Linked policy is edited through the source association form and preserved on summary refresh.
+- `memoryOverview`：返回 `{schemaVersion:1,entries,groups,counts}`。条目包括状态、核验修订、完整范围、来源状态与读取条件。核心、现有主题、未分组、待确认候选提供入口；归档单独计数。只有可用、已确认且来源当前的完整短正文才作为事实显示，不可读记录不继承缓存策略。
+- `context(query,paths)`：默认保持 `{text}`；`explain:true` 额外返回 `explanation`。`memoryMode` 为 `automatic` 或 `manual`，默认手动。显式自动模式是只读预览，不持久化诊断。
+- `context.since`：保留基于元数据的增量查询，可复用有效索引而不加载记忆正文；不与解释或显式模式组合。
+- `memoryTraces`：只读 `{schemaVersion:1,traces,warnings}`，不创建目录或新增记录。
 
-## Acceptance mapping
+解释包含版本、模式、预算、实际预算用量、完整输出字符数、上下文及候选快照哈希、计数和逐条决策。决策区分资格、排序入选和最终 `fact/pointer/omitted`，给出如草稿、范围不匹配、来源过期、正文超限、预算不足等原因，不以“被排序”冒充“已输出”。预览使用过滤后的标题，不包含事实正文。比较时必须核对候选快照、任务、路径与预算；自动和手动的不同结果不能直接判为不一致。
 
-`memory-retrieval.test.cjs` enters through the real service and extension event entry points. It covers older relevant rules behind newer unrelated records, Chinese task terms, generic continuation, draft/confirmation transitions, scoped core priority, path boundaries, invalid metadata before writes, cache identity-independent scope verification, document policy persistence, complete reading conditions, exceptions beyond old cutoffs and automatic-title suppression. Public tool fields and bounded pointer fallback are also checked.
+## 自动准备诊断
 
-`tests/flow.py` exercises candidate creation, confirmation, scoped retrieval, priority persistence through a title edit and withdrawal of confirmation through the real panel, service and Markdown storage. It also covers the existing document-memory association, partial-failure retry and stale-source paths. `tests/extension-host.mjs` verifies the actual host extension loader without a real model, and the standalone CDP acceptance retains prior panel interactions and draft isolation.
+扩展在 `before_agent_start` 生成上下文后保存同一解释的受限投影。记录只证明插件准备过该文本，不能证明模型接收、阅读或遵从。记录不保存原始查询、系统提示、标题、正文、主题、任意路径或范围。
 
-The scope parser validates complete prompt tokens before accepting relative paths. Relative-looking suffixes inside absolute locations or URLs do not establish scope. Explicit root-level names such as `package.json` and `Makefile` match their exact scopes. Failed actual memory reads are omitted from context even when a linked row remains cached; library presentation may still show an unavailable association for diagnosis.
+允许字段为版本、随机 trace ID、会话键哈希、时间、模式与固定预算、字符数、上下文与候选哈希、计数、裁掉的明细数；逐条明细仅含记忆键哈希、修订、来源修订、分数、资格、核心保留、入选顺序、最终呈现及允许的原因代码。未知字段或版本、无效哈希、越界数值及非枚举原因拒绝。不会展开原始解释对象直接保存。
 
-The panel serializes autosaves and tracks the edit generation across both the write and subsequent snapshot read. Input entered while either operation is pending remains in the form and is saved against the newly returned revision before any rerender. Browser acceptance pauses a real save request, withdraws confirmation while it is pending, then verifies that the final persisted status is draft. Policy-only association drafts also survive source autosave when the user clears the scope or removes core priority.
+目录为 `.bone-project-wiki/memory/recall-traces/`。每条最多 20 KiB，写入时保留最近 10 条；过大的明细可裁掉但真实计数与 `detailsOmitted` 保留。原生写入使用私有文件权限、临时文件与原子替换，核对目录身份并拒绝符号链接。不存在知识库时不会为了诊断初始化项目。项目、会话、请求代次及取消信号在异步准备期间核对，旧结果不能写入新任务；诊断保存失败会提示但保留正常上下文。
+
+服务仅通过宿主文件 API 读取与清理，不引入原生 fs 绕过权限。宿主 `stat/list` 不提供符号链接身份，因此 API 侧不能独立保证拒绝所有范围内链接，仍受宿主真实路径及既有范围授权约束。优先使用 `readRange` 做限量读取；旧宿主只能回退 `readText` 时，分配上限由宿主管理，随后核验实际字节数与文件状态。目录达到 500 项时按可能被截断处理，不报告完整扫描。
+
+`forget` 和文件树的记忆删除共用同一流程：删除前清理相关诊断并复核记忆修订，核验删除后再次清理；裁掉明细的诊断也保守清除。自动写入在落盘后复核记忆文件是否仍存在，引用已删除时清理本次持有的诊断并丢弃过期上下文。测试覆盖先遗忘后发布、先发布后删除两种交错。无法核验的诊断或清理失败不会报告完全遗忘，源文档继续保留。该机制不能撤回模型或对话中的历史上下文，也不提供跨进程的原子遗忘保证。
+
+## 面板与既有流程
+
+保留知识库/记忆两标签、文件树和原编辑器。0.3.1 支持从左上角收起/展开文件树，仅改变布局，保留当前记录和输入。记忆标签无当前记录时显示总览，记录详情可返回；新建仍进入原编辑器。查询、路径、模式与筛选在刷新时保留，较晚响应不能覆盖新输入或其他项目视图。旧解释在刷新后标为需重新预览，历史诊断与当前修订不同时标为已更新，不显示被删除或不可读记忆的旧事实。
+
+普通记忆可编辑确认状态、范围和优先级；关联记忆继续通过原文关联表单更新。自动保存串行化，写入及后续快照期间的新输入和摘要草稿保持，切换项目不带入旧项目。Markdown 阅读、满幅 HTML、首击保护及宿主主题不变。
+
+## 验收对应
+
+- `memory-diagnostics.test.cjs`：对照冻结的发布文本哈希，核验最终事实/入口/省略、排除原因、不可读缓存和手动精确预算边界。
+- `memory-retrieval.test.cjs`：从真实服务与扩展事件入口覆盖旧规则相关性、候选确认、路径范围、核心优先、完整例外、总览只读、来源状态、默认工具兼容、两种模式一致性、增量读取及准备记录/遗忘。
+- `recall-traces.test.mjs`：真实临时文件系统与宿主 API 适配器覆盖字段白名单、容量、保留、无写读取、损坏文件、原生链接拒绝、过期取消、工作区切换、清理失败及限量读取。
+- `extension.test.mjs`：覆盖项目/会话/取消期间的准备失效、同会话新轮次保护、诊断失败仍返回上下文，以及原有结算保存与失败清理。
+- `tests/memory-overview-flow.py`：真实面板 → 服务 → 存储，覆盖分组、两种预算、实际准备哈希与隐私、原文导航及过期、新建、较晚预览、刷新输入保护和深浅响应布局。
+- `tests/flow.py`、`tests/focus-flow.py`、`tests/markdown-flow.py`、`tests/html-flow.py`、独立浏览器测试及 `tests/extension-host.mjs`：回归既有完整用户路径与真实宿主加载器。
+
+确切执行结果见 [VALIDATION](../VALIDATION.md)。未使用真实模型、付费调用或运行中的用户实例作为默认测试环境。

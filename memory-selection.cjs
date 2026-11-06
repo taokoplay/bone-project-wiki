@@ -1,5 +1,6 @@
 'use strict';
 const { usableMemory, sensitiveMemory, normalizedText } = require('./memory-policy.cjs');
+const { sourceState } = require('./memory-diagnostics.cjs');
 
 const MAX_SCOPE_PATHS = 16;
 const CORE_RESERVE = 2;
@@ -56,43 +57,76 @@ function queryTerms(query) {
   return [...terms].slice(0, 96);
 }
 
-function applicableMemories(entries, options = {}) {
-  const rootScopes = entries.flatMap(entry => Array.isArray(entry.scopePaths) ? entry.scopePaths.filter(name => typeof name === 'string' && !name.includes('/')) : []);
-  const paths = taskPaths(options.query, options.paths, rootScopes);
-  return entries.filter(entry => {
-    if ((entry.kind !== 'memory' && entry.category !== 'memory') || entry.status !== 'confirmed') return false;
-    try {
-      const { scopePaths = [] } = normalizeMemoryMetadata(entry);
-      if (scopePaths.length && !scopePaths.some(scope => paths.some(name => name === scope || name.startsWith(`${scope}/`)))) return false;
-    } catch { return false; }
-    if (usableMemory(entry)) return true;
-    // A verified unavailable link may supply a route and state, never its former facts.
-    return entry.content === '' && entry.documentLink && entry.documentLink.state !== 'current';
-  });
+function eligibility(entry, paths) {
+  if (entry.kind !== 'memory' && entry.category !== 'memory') return { eligible:false, reasons:['not_memory'] };
+  if (entry.readable === false) return { eligible:false, reasons:['unreadable'] };
+  if (entry.status !== 'confirmed') return { eligible:false, reasons:[entry.status === 'archived' ? 'archived' : 'draft'] };
+  let scopePaths;
+  try { ({ scopePaths = [] } = normalizeMemoryMetadata(entry)); }
+  catch { return { eligible:false, reasons:['invalid_metadata'] }; }
+  if (scopePaths.length && !scopePaths.some(scope => paths.some(name => name === scope || name.startsWith(`${scope}/`)))) {
+    return { eligible:false, reasons:['scope_mismatch'] };
+  }
+  const state = sourceState(entry);
+  const reasons = state === 'standalone' ? [] : [`source_${state}`];
+  if (entry.documentRef && !entry.documentLink) return { eligible:false, reasons:['source_unreadable'] };
+  if (entry.documentLink && state !== 'current') {
+    const known = ['stale','draft','archived','missing','unreadable','ambiguous'].includes(state);
+    return { eligible:known, reasons:known ? reasons : ['source_unreadable'] };
+  }
+  if (usableMemory(entry)) return { eligible:true, reasons };
+  return { eligible:false, reasons:[...reasons, sensitiveMemory(normalizedText(entry.content)) ? 'sensitive' : normalizedText(entry.content) ? 'request_only' : 'empty'] };
 }
 
 function relevance(entry, terms) {
+  // Non-current source text must not influence the score or re-enter a fact.
+  const body = entry.documentLink && sourceState(entry) !== 'current' ? '' : entry.content;
   const fields = [
-    [entry.title, 5],
-    [entry.documentRef?.readWhen, 4],
-    [(entry.topics || []).join(' '), 4],
-    [(entry.tags || []).join(' '), 2],
-    [String(entry.content || '').slice(0, 4000), 1],
-  ].map(([text, weight]) => [normalizedText(text).normalize('NFKC').toLowerCase(), weight]);
-  return terms.reduce((score, term) => score + fields.reduce((sum, [text, weight]) => sum + (text.includes(term) ? weight : 0), 0), 0);
+    ['title',entry.title,5], ['readWhen',entry.documentRef?.readWhen,4],
+    ['topics',(entry.topics || []).join(' '),4], ['tags',(entry.tags || []).join(' '),2],
+    ['body',String(body || '').slice(0,4000),1]
+  ];
+  let score = 0;
+  const matchedFields = [];
+  for (const [name,text,weight] of fields) {
+    const normalized = normalizedText(text).normalize('NFKC').toLowerCase();
+    const hits = terms.filter(term => normalized.includes(term)).length;
+    if (hits) { score += hits * weight; matchedFields.push(name); }
+  }
+  return { score, matchedFields };
 }
 
-function selectMemories(entries, options = {}) {
+function analyzeMemorySelection(entries, options = {}) {
+  const rootScopes = entries.flatMap(entry => Array.isArray(entry.scopePaths) ? entry.scopePaths.filter(name => typeof name === 'string' && !name.includes('/')) : []);
+  const paths = taskPaths(options.query, options.paths, rootScopes);
   const terms = queryTerms(options.query);
-  const limit = options.limit ?? 6;
-  const ranked = applicableMemories(entries, options).map(entry => ({ entry, score: relevance(entry, terms) }));
-  ranked.sort((a, b) => b.score - a.score
+  const limit = Math.max(0, options.limit ?? 6);
+  const decisions = entries.map(entry => {
+    const result = eligibility(entry,paths);
+    return { entry, ...result, ...(result.eligible ? relevance(entry,terms) : { score:0, matchedFields:[] }),
+      selected:false, coreReserved:false, rank:null, presentation:'omitted' };
+  });
+  const ranked = decisions.filter(row => row.eligible);
+  ranked.sort((a,b) => b.score-a.score
     || String(b.entry.updatedAt || '').localeCompare(String(a.entry.updatedAt || ''))
     || String(a.entry.id || a.entry.path || a.entry.title).localeCompare(String(b.entry.id || b.entry.path || b.entry.title)));
-  const reserved = ranked.filter(row => row.entry.importance === 'core').slice(0, Math.min(CORE_RESERVE, limit));
-  const chosen = new Set(reserved.map(row => row.entry));
-  const relevant = ranked.filter(row => !chosen.has(row.entry) && (!terms.length || row.score > 0));
-  return [...reserved, ...relevant].slice(0, limit).map(row => row.entry);
+  const reserved = ranked.filter(row => row.entry.importance === 'core').slice(0,Math.min(CORE_RESERVE,limit));
+  const reservedSet = new Set(reserved);
+  const relevant = ranked.filter(row => !reservedSet.has(row) && (!terms.length || row.score > 0));
+  const chosen = [...reserved,...relevant].slice(0,limit);
+  chosen.forEach((row,index) => {
+    row.selected = true; row.rank = index+1; row.coreReserved = reservedSet.has(row);
+    row.reasons.push(row.coreReserved ? 'core_reserved' : terms.length ? 'relevance_match' : 'recent_fallback');
+  });
+  for (const row of ranked) if (!row.selected) row.reasons.push(terms.length && !row.score && !reservedSet.has(row) ? 'not_relevant' : 'entry_limit');
+  return { decisions, chosen, applicable:ranked.map(row => row.entry) };
 }
 
-module.exports = { normalizeScopePaths, normalizeMemoryMetadata, taskPaths, queryTerms, applicableMemories, selectMemories };
+function applicableMemories(entries, options = {}) {
+  return analyzeMemorySelection(entries,options).applicable;
+}
+function selectMemories(entries, options = {}) {
+  return analyzeMemorySelection(entries,options).chosen.map(row => row.entry);
+}
+
+module.exports = { normalizeScopePaths, normalizeMemoryMetadata, taskPaths, queryTerms, applicableMemories, selectMemories, analyzeMemorySelection };

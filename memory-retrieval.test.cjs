@@ -228,3 +228,148 @@ test('explicitly named root files and directories establish their exact scope', 
   assert.match(await f.start('Change Makefile'), /build entry must preserve/);
   assert.doesNotMatch(await f.start('Change other/package.json'), /root manifest must preserve/);
 });
+
+test('read-only master overview groups verified records without rewriting their source', async t => {
+  const f=await fixture(t);
+  const core=await f.request('save',memory('Refund core','Refunds retain an audit receipt.',{importance:'core',topics:['Payments']}));
+  const draft=await f.request('save',memory('Refund draft','Draft allowance is unlimited.',{status:'draft'}));
+  const old=await f.request('save',memory('Legacy preference','Use clear labels.'));
+  const before=await Promise.all([core,draft,old].map(row=>f.api.fs.readText(row.path)));
+  const overview=await f.request('memoryOverview');
+  assert.equal(overview.schemaVersion,1);
+  assert.equal(overview.entries.find(row=>row.id===core.id).summary,core.content);
+  assert.equal(overview.entries.find(row=>row.id===draft.id).summary,'');
+  assert.ok(overview.groups.some(group=>group.type==='core'&&group.keys.includes(overview.entries.find(row=>row.id===core.id).key)));
+  assert.ok(overview.groups.some(group=>group.type==='topic'&&group.topic==='Payments'));
+  assert.ok(overview.groups.some(group=>group.type==='ungrouped'&&group.keys.includes(overview.entries.find(row=>row.id===old.id).key)));
+  assert.ok(overview.groups.some(group=>group.type==='candidates'));
+  assert.deepEqual(await Promise.all([core,draft,old].map(row=>f.api.fs.readText(row.path))),before);
+  assert.equal((await f.request('snapshot')).memoryCapabilities.overview,true);
+  const plain=await f.request('context',{query:'refund'});
+  const explained=await f.request('context',{query:'refund',explain:true});
+  assert.deepEqual(Object.keys(plain),['text']);
+  assert.equal(explained.text,plain.text);
+  assert.equal(explained.explanation.mode,'manual');
+  assert.equal(explained.explanation.decisions.find(row=>row.id===draft.id).presentation,'omitted');
+  await assert.rejects(f.request('context',{memoryMode:'everything'}),/INVALID_MEMORY_MODE/);
+  await assert.rejects(f.request('context',{explain:'yes'}),/INVALID_MEMORY_EXPLAIN/);
+  assert.deepEqual((await f.request('memoryTraces')).traces,[]);
+  await assert.rejects(fs.access(path.join(f.root,ROOT,'memory/recall-traces')));
+});
+
+test('overview follows stable source identity while a changed source withholds its previous summary', async t => {
+  const f=await fixture(t);
+  const linked=await f.request('remember',{kind:'document',category:'business',status:'confirmed',title:'Refund source',content:'Refunds require receipts.',summary:'Refunds require receipts.',readWhen:'Before refund changes'});
+  await f.request('save',{...linked.document,content:'Refunds require an invoice.',expectedRevision:linked.document.revision});
+  const overview=await f.request('memoryOverview');
+  const entry=overview.entries.find(row=>row.id===linked.memory.id);
+  assert.equal(entry.sourceState,'stale');assert.equal(entry.summary,'');
+  assert.equal(entry.source.recordId,linked.document.recordId);
+  const explanation=(await f.request('context',{query:'refund',explain:true,memoryMode:'automatic'})).explanation;
+  const decision=explanation.decisions.find(row=>row.id===linked.memory.id);
+  assert.equal(decision.presentation,'pointer');assert.ok(decision.reasons.includes('source_stale'));
+});
+
+test('automatic preparation persists privacy-bounded explanation and forgetting clears its references', async t => {
+  const f=await fixture(t);
+  const saved=await f.request('save',memory('Refund audit','Refunds require an audit receipt.'));
+  const automatic=await f.start('Implement refund validation confidential-note-428');
+  const history=await f.request('memoryTraces');assert.equal(history.traces.length,1);
+  const trace=history.traces[0];
+  assert.equal(trace.mode,'automatic');
+  assert.equal(trace.contextHash,require('./core.cjs').hash(automatic.slice('BASE\n\n'.length)));
+  assert.doesNotMatch(JSON.stringify(history),/confidential-note-428|Refunds require an audit receipt|Retrieval test|user prompt/);
+  assert.ok(trace.decisions.every(row=>!('id' in row)&&!('title' in row)&&!('content' in row)));
+  await f.request('forget',{id:saved.id,expectedRevision:saved.revision});
+  assert.deepEqual((await f.request('memoryTraces')).traces,[]);
+});
+
+test('incremental context uses warmed metadata without loading memory bodies', async t => {
+  const f=await fixture(t);
+  const saved=await f.request('save',memory('Incremental rule','Keep the full rule in its owned record.'));
+  await f.request('snapshot');
+  const read=f.api.fs.readText, bodies=[];
+  f.api.fs.readText=async name=>{if(name.endsWith('.md')) bodies.push(name);return read(name);};
+  const result=await f.request('context',{since:'2020-01-01T00:00:00.000Z'});
+  assert.ok(result.changed.some(row=>row.id===saved.id));
+  assert.deepEqual(bodies,[]);
+  await assert.rejects(f.request('context',{since:'2020-01-01',explain:true}),/INVALID_MEMORY_QUERY/);
+});
+
+test('automatic preview matches extension preparation for draft, stale and long source records', async t => {
+  const f=await fixture(t);
+  await f.request('save',memory('Refund candidate','Unconfirmed refund exception.',{status:'draft'}));
+  await f.request('save',memory('Refund long rule','Refund exceptions require approval. '.repeat(12)));
+  const linked=await f.request('remember',{kind:'document',category:'business',status:'confirmed',title:'Refund source',content:'Refund evidence stays in the source.',summary:'Refund summaries require evidence.',readWhen:'Before changing refunds'});
+  await f.request('save',{...linked.document,content:'Updated refund evidence needs an invoice.',expectedRevision:linked.document.revision});
+  const query='Implement refund validation';
+  const preview=await f.request('context',{query,explain:true,memoryMode:'automatic'});
+  assert.equal(await f.start(query),`BASE\n\n${preview.text}`);
+  assert.equal((await f.request('memoryTraces')).traces[0].contextHash,preview.explanation.contextHash);
+  assert.ok(preview.explanation.decisions.some(row=>row.reasons.includes('draft')));
+  assert.ok(preview.explanation.decisions.some(row=>row.reasons.includes('source_stale')));
+  assert.ok(preview.explanation.decisions.some(row=>row.reasons.includes('body_limit')));
+});
+
+test('the public tool exposes read-only overview, traces and explicit explanation modes', async t => {
+  const main=require('./main.js');let registered;
+  const previous=global.pi;
+  global.pi={commands:{register:async()=>{},unregister:async()=>{}},agent:{registerTool:async value=>{registered=value;},unregisterTool:async()=>{}}};
+  try {await main.onLoad();await main.onUnload();} finally {global.pi=previous;}
+  for(const action of ['memoryOverview','memoryTraces','context']) {
+    assert.ok(main.schema.properties.action.enum.includes(action));
+    assert.ok(registered.planSafeActions.includes(action));
+  }
+  assert.equal(main.schema.properties.explain.type,'boolean');
+  assert.deepEqual(main.schema.properties.memoryMode.enum,['automatic','manual']);
+});
+
+test('file-tree memory deletion uses the same verified trace cleanup as forget', async t=>{
+  const f=await fixture(t);
+  const saved=await f.request('save',memory('Refund audit','Refunds require a retained receipt.'));
+  await f.start('Implement refund audit');
+  assert.equal((await f.request('memoryTraces')).traces.length,1);
+  assert.equal((await f.request('delete',{id:saved.id,section:'memory',expectedRevision:saved.revision})).deleted,true);
+  assert.deepEqual((await f.request('memoryTraces')).traces,[]);
+});
+
+test('automatic preview preserves native eligibility before projecting unusable linked summaries', async t=>{
+  for(const body of ['','password=fixture-sensitive']) for(const state of ['stale','missing']) await t.test(`${body?'sensitive':'empty'} ${state}`,async t=>{
+    const f=await fixture(t);
+    const linked=await f.request('remember',{kind:'document',category:'business',status:'confirmed',title:'Refund source',content:'Refund evidence requires a receipt.',summary:'Refund evidence requires a receipt.',readWhen:'Before changing refunds'});
+    await f.api.fs.writeText(linked.memory.path,encode({...linked.memory,content:body}));
+    if(state==='missing') await f.api.fs.remove(linked.document.path);
+    else await f.request('save',{...linked.document,content:'Refund evidence now needs an invoice.',expectedRevision:linked.document.revision});
+    const query='Implement refund audit';
+    const preview=await f.request('context',{query,memoryMode:'automatic',explain:true});
+    assert.equal(await f.start(query),`BASE\n\n${preview.text}`);
+    assert.equal(preview.explanation.decisions.find(row=>row.id===linked.memory.id).selected,false);
+    assert.ok(!preview.text.includes(linked.document.recordId));
+  });
+});
+
+function deferred() {let resolve;const promise=new Promise(done=>{resolve=done;});return {promise,resolve};}
+test('forget and an overlapping automatic trace cannot leave a deleted memory reference', async t=>{
+  for(const order of ['publish-after-forget','publish-before-delete']) await t.test(order,async t=>{
+    const f=await fixture(t);
+    const saved=await f.request('save',memory('Refund audit','Refunds require a retained receipt.'));
+    const entered=deferred(), release=deferred();t.after(()=>release.resolve());
+    if(order==='publish-after-forget') {
+      const rename=fs.rename;
+      t.mock.method(fs,'rename',async(...args)=>{
+        if(String(args[1]).includes('/recall-traces/')&&String(args[1]).endsWith('.json')) {entered.resolve();await release.promise;}
+        return rename(...args);
+      });
+      const pending=f.start('Implement refund audit');await entered.promise;
+      await f.request('forget',{id:saved.id,expectedRevision:saved.revision});
+      release.resolve();await pending;
+    } else {
+      const remove=f.api.fs.remove;
+      f.api.fs.remove=async name=>{if(name===saved.path){entered.resolve();await release.promise;}return remove(name);};
+      const forgetting=f.request('forget',{id:saved.id,expectedRevision:saved.revision});await entered.promise;
+      await f.start('Implement refund audit');release.resolve();await forgetting;
+    }
+    assert.deepEqual((await f.request('memoryTraces')).traces,[]);
+    await assert.rejects(fs.access(path.join(f.root,saved.path)),{code:'ENOENT'});
+  });
+});

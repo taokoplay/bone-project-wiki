@@ -6,7 +6,7 @@
 
 ## 核心特性
 
-- **类 Obsidian 层级文件树**：左侧树形目录导航，支持文件夹无极层级折叠展开、新建目录、折叠/展开全部、快速刷新。
+- **可收起的层级文件树**：左上角按钮可收起或展开整个文件侧栏，收起后内容占满可用空间。支持多级文件夹、新建目录、折叠/展开全部和快速刷新；保留搜索、当前选择及编辑内容。开关状态在本次面板内保留，重新打开面板时默认展开，支持 Enter/空格操作。
 - **Markdown reading and source editing**: existing notes open as formatted read-only documents. Use **Edit record** to edit the source with automatic saving; **Read mode** waits for the latest save before showing the formatted result. New records start in editing mode. Titles continue to determine their Markdown filenames.
 - **全格式文件与多媒体支持**：
   - **文档**：原生 Markdown（`.md`）、纯文本（`.txt`）、Word 文档（`.docx`, `.doc`）、WPS 文档（`.wps`, `.wpt`）、PDF（`.pdf`）。
@@ -49,6 +49,16 @@ Markdown rendering runs fully offline and follows the host theme. Source HTML is
 - **候选隔离**：记忆草稿保留在面板，确认前不进入自动或手动上下文。编辑记忆时可展开“适用范围与优先级”，勾选内容已确认；取消确认后停止用于后续任务。
 - **范围与核心规则**：范围留空表示当前项目，填写项目相对路径可限定到模块；任务须明确涉及匹配路径才会使用。核心规则在其适用范围内保留有限预算。
 
+### 查看记忆总览与召回解释
+
+0.3.1 在“记忆”标签提供只读总览，沿用两主标签和可收起的左侧文件树。核心规则、现有主题、未分组记录与待确认候选分别提供入口；可查看确认状态、来源是否最新、完整适用范围及“何时读取”。总览由实际记录派生，完整规则继续保存在原文，原文无法核验时不沿用缓存中的旧事实。新建与编辑仍使用原有自动保存流程。
+
+在“召回预览”输入任务与可选的项目相对路径，选择自动或手动模式后检索。结果区说明每条记忆是否适用、为何入选，以及最终提供完整事实、全文入口或省略。自动模式为 1200 字符、最多 6 条、单条正文 180 字符；手动模式的内容块为 10000 字符、最多 16 条、单条记忆正文 1800 字符，其原有提示前缀不计入内容块预算。两种模式的结果应结合各自预算比较，不能直接视为同一次召回。
+
+“最近准备记录”只表示扩展已生成过自动记忆上下文，不能证明模型收到、读取或遵守。每项目保留最近 10 条，单条不超过 20 KiB；仅保存哈希、修订、计数与允许的原因代码，不保存原始查询、标题、正文或路径。手动预览和查看记录不会新增诊断；诊断保存失败会提示并保留正常上下文。遗忘或从文件树删除记忆共用清理流程，删除前后核对相关诊断；自动写入在落盘后复核引用是否仍存在。清理失败不会报告完全遗忘。
+
+本版的记忆改造包含阶段 A。替代、合并、恢复和语义检索仍未实现；旧版记录继续可读，查看总览不会批量改写或自动确认资料。安装或更新请使用插件市场中已公开的版本。
+
 ## 重要规则如何关联记忆
 
 重要的规则、业务流程和例外条件保存在完整主题文档中；记忆只保留简短摘要、适用场景及原文关联。
@@ -82,7 +92,8 @@ Agent 保存记忆或关联文档时，可传 `scopePaths`（最多 16 个项目
 │   └── 财务资料/              # 用户自定义分类目录
 │       └── 预算报表.xlsx      # 办公文档与表格附件
 └── memory/                   # Agent 自动捕获的项目协作记忆
-    └── index.json
+    ├── index.json
+    └── recall-traces/        # 自动上下文准备诊断，按上限保留
 ```
 
 - **索引缓存机制**：知识库通过派生的 `index.json` 记录文件大小和修改时间，减少普通列表的重复读取。记忆召回在现有数量和字节上限内核验实际记忆正文，文档关联还会核验来源身份与正文，避免缓存掩盖范围变化或来源冲突。删除索引后可从原文件重建，原始记录仍保留。
@@ -118,4 +129,6 @@ AI Agent 可通过 `project_wiki` 工具安全管理与检索当前项目的知�
 ```
 
 支持的操作（Actions）：
-`snapshot`, `init`, `read`, `save`, `remember`, `import`, `search`, `context`, `export`, `move`, `delete`, `deleteCategory`, `reveal`, `openDefault`, `preferencesGet`, `preferencesSave`, `forget`, `reindex`。
+`snapshot`, `init`, `read`, `save`, `remember`, `import`, `search`, `context`, `memoryOverview`, `memoryTraces`, `export`, `move`, `delete`, `deleteCategory`, `reveal`, `openDefault`, `preferencesGet`, `preferencesSave`, `forget`, `reindex`。`deleteCategory` 与 `openDefault` 仍是面板兼容动作。
+
+`memoryOverview` 返回派生分组和条目。`context` 默认继续仅返回 `{text}`；显式传 `explain: true` 才增加解释，`memoryMode` 为 `automatic` 或 `manual`，默认手动。`memoryTraces` 只读准备记录。先用 `snapshot.memoryCapabilities` 判断能力，继续使用其当前 `workspacePath`。增量 `context.since` 保持元数据查询，不能与解释或显式模式组合。

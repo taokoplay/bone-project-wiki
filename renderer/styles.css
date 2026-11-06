@@ -32,6 +32,10 @@ textarea { resize: vertical; min-height: 112px; line-height: 1.65; }
 .primary { background: var(--accent); color: var(--ds-bg-primary, var(--paper)); border-color: var(--accent); }
 .primary:hover:not(:disabled) { background: var(--ds-accent-hover, var(--muted)); }
 header { flex: 0 0 auto; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; gap: 20px; border-bottom: 1px solid var(--line); flex-wrap: wrap; box-sizing: border-box; }
+.identity { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.sidebar-toggle { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 32px; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 6px; color: var(--muted); }
+.sidebar-toggle:hover:not(:disabled) { color: var(--ink); }
+.sidebar-toggle[aria-expanded="false"] .sidebar-toggle-arrow { transform: translateX(29px) scaleX(-1); }
 .identity h1 { margin: 0; font-size: 20px; line-height: 1.25; font-weight: 650; letter-spacing: -.02em; }
 h1 { margin: 4px 0 0; font-size: 18px; line-height: 1.4; font-weight: 600; overflow-wrap: anywhere; }
 h2 { margin: 0 0 16px; font-size: 18px; line-height: 1.4; font-weight: 600; overflow-wrap: anywhere; }
@@ -49,6 +53,8 @@ p { margin: 8px 0 16px; }
 .tools .panel-close { display: inline-flex; align-items: center; justify-content: center; padding-inline: 12px; min-width: 40px; }
 .tools .panel-close::first-letter { font-size: 18px; }
 .shell { flex: 1 1 auto; min-height: 0; height: 100%; display: grid; grid-template-columns: minmax(260px, 320px) minmax(0, 1fr); overflow: hidden; position: relative; }
+.shell.sidebar-collapsed { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.library[hidden] { display: none; }
 .section-label { color: var(--muted); font-size: 12px; padding: 0 12px 12px; }
 /* PI-Desktop's menu-select surface: a pill trigger (SettingsMenuSelect) and a
    fixed listbox portaled to <body> (AnchoredMenu). Native <select> popups are

@@ -35,9 +35,20 @@ async function main() {
       }
     }
   });
+  const handlers = {};
+  const extension = (await import('../extension.mjs')).default;
+  extension({on:(event,handler)=>{handlers[event]=handler;}});
   const server=http.createServer(async(req,res)=>{
     try {
       const route=new URL(req.url,'http://localhost').pathname;
+      if(route==='/test/prepare-memory' && req.method==='POST'){
+        const chunks=[];for await(const chunk of req)chunks.push(chunk);
+        const input=JSON.parse(Buffer.concat(chunks).toString());
+        const notices=[];
+        const prepared=await handlers.before_agent_start({prompt:input.query || '',systemPrompt:'TEST BASE'},
+          {cwd:root,sessionManager:{getSessionId:()=>input.sessionId || 'overview-flow'},ui:{notify:(message)=>notices.push(message)}});
+        res.setHeader('Content-Type','application/json');res.end(JSON.stringify({prepared,notices}));return;
+      }
       if(route==='/test/fail-memory' && req.method==='POST'){
         const chunks=[];for await(const chunk of req)chunks.push(chunk);
         failMemory=JSON.parse(Buffer.concat(chunks).toString()).enabled===true;
