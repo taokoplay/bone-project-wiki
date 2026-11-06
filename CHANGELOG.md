@@ -1,5 +1,13 @@
 # 更新日志（CHANGELOG）
 
+## 0.3.5 (workspace discovery repair)
+
+- Fix a 0.3.4 regression where a snapshot with an empty or stale optional `workspacePath` failed with `WORKSPACE_CHANGED`, blocking the discovery step before initialization or saving.
+- Restore snapshot discovery from the actual host workspace. The operation binds to that discovered project at execution and still rejects a real project change during I/O.
+- Other public actions and private save/search channels keep strict workspace matching; no record format, permission, memory metadata validation or migration changes.
+- Add regressions for empty/stale hints, initialized and new libraries, the registered tool discovery/initialize/save/read path, queued recovery, project changes and unload.
+- Restores the discovery contract used before 0.3.4 while preserving strict project matching for initialization, reads, writes and searches.
+
 ## 0.3.4 (offline XLSX previews, save and latest-search performance)
 
 - Save and its full snapshot share one serialized operation. Verified bodies and scans are reused only within that operation; unchanged derived indexes are not rewritten. Final revision checks, target collision checks and write readback still use fresh bytes.

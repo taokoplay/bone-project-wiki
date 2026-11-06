@@ -12,6 +12,10 @@ requestCapabilities: {schemaVersion:1, latestSearch:true, saveSnapshot:true}
 
 The public project_wiki schema/actions and existing `wiki` channel remain compatible. Default save still returns a record. No capability means renderer uses the released search/save/snapshot path. The new panel channels are private implementation contracts of the same bundle.
 
+Snapshot is a discovery operation. Any caller-supplied `workspacePath`, including an empty or stale hint, is ignored when establishing its scope, as in releases before 0.3.4. The scope binds to the first actual host workspace at execution and rejects changes during later awaits or I/O. Every non-snapshot action still requires the exact returned workspace path. An ignored hint neither selects a different project nor authorizes reads or writes there.
+
+The 0.3.5 regression path uses the registered public tool with default-filled snapshot arguments, then initializes the returned workspace, saves a document and reads back its verified revision. Tests also cover queued discovery after an interrupted old-project read, empty/stale hints on initialized libraries, unchanged public/private mutation and search guards, and local-project/unload boundaries.
+
 ## Latest panel searches
 
 `wiki.search` calls `service.requestLatestSearch(payload)` with:

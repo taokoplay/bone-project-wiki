@@ -1,5 +1,24 @@
 # 功能验证与测试验收报告（VALIDATION）
 
+## 0.3.5 publication preparation
+
+- The user authorized Git submission and marketplace publication of the verified workspace-discovery repair. The account owns `bone.project-wiki`, is bound to `taokoplay/bone-project-wiki`, and version 0.3.5 is available with no pending version.
+- Publication preparation updates release copy only. Executable files and host declarations must match the accepted candidate, SHA-256 `371f185f9b22363c787b803fd6dda8505fc354ee477062301d2ea099d2623d24`. Original candidate bytes and validation evidence remain preserved.
+- Submit the complete host manifest and committed runtime files with a pushed source commit. The platform rebuilds the manifest; official bytes, public status and native-upgrade verification are recorded separately after actual download. Approval alone does not establish publication.
+- The candidate status statements below describe the completed prepublication validation. No running user installation or user-owned knowledge project is used as a test environment.
+- Release preparation reran the full 238-test suite successfully with no failures/skips/cancellations. The i18n gate has zero failures and four existing brand-title reviews. Seven explicit source, regression-test, manifest and documentation paths are included; archives, logs and user data are excluded.
+- Local release-preparation package: 62 files, 516306 bytes, SHA-256 `ce2c98c337d2ef7c64a5c53508592514210addb77947b6952fba4d6a012f6c81`. All executable files and the manifest match the accepted candidate exactly; only changelog wording differs. Source parity, private-path checks and documentation links pass.
+
+## 0.3.5 snapshot workspace-discovery repair candidate
+
+- Confirmed 0.3.4 compatibility regression: the new operation scope treated an empty or stale optional snapshot workspace hint as an expected project. Discovery failed before initialization/save. A temporary actual-source comparison confirmed the prior 0.3.3 behavior.
+- Only snapshot starts without a caller-bound workspace; the first actual host result binds the operation. Real project changes during awaits still reject. All non-snapshot public/private actions retain strict matching, permission, revision and write-readback checks.
+- Six new regressions had four failures on the old implementation. The fixed full suite passes 238 tests with no failures/skips/cancellations. It covers initialized/uninitialized discovery, the registered-tool discovery/init/save/read path, queued recovery, real I/O switching, mutation/search guards and unload.
+- The actual save/search browser flow and real extension loader pass. Seventy-two JavaScript files, ten Python test files, Shell syntax, documentation links and diff whitespace pass; the i18n gate has zero failures and the same four brand-title reviews.
+- Candidate: 62 uncompressed files, 516297 bytes, SHA-256 `371f185f9b22363c787b803fd6dda8505fc354ee477062301d2ea099d2623d24`. Source parity, dependency closure, privacy and extracted empty-hint discovery pass. Only request-runtime executable behavior changes from official 0.3.4; other differences are version/docs.
+- Isolated native official 0.3.4 to candidate 0.3.5 upgrade passes with all 62 installed hashes, preserved plugin test data and no permission difference. No user transcript, project or running installation was modified; no paid API, second dependency environment or verify:ui command was used.
+- Branch `fix/wiki-snapshot-workspace-discovery` is based on main `ce261f22f6215f5528e133e67271295a7058a15f`; remote main was refreshed and remains its ancestor. The repair is uncommitted, unpushed and unpublished. Runtime deployment remains outstanding; the candidate is delivered for update, and omitting the optional workspacePath entirely is the released-version workaround.
+
 ## 0.3.4 publication preparation
 
 - The user authorized marketplace publication of `bone.project-wiki@0.3.4`. The account owns the plugin and is bound to `taokoplay/bone-project-wiki`; the version is available and no earlier version is waiting for review.
