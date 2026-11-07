@@ -1,5 +1,14 @@
 # 更新日志（CHANGELOG）
 
+## 0.3.6 (project-isolated requests)
+
+- Resolve the actual host workspace before request admission, maintain independent project queues, and use one FIFO queue for sessions sharing a project. Calls in different projects can progress concurrently.
+- Preserve each queued job's async invocation identity and give every operation a separate async-local scope, preventing queue pumps, body caches and search generations from crossing project boundaries.
+- Keep plugin-wide personal preferences on a separate serialized settings queue. Retain at most 32 idle project entries and 32 search clients per project, without evicting active queues.
+- Reject a real project rebind after admission, including while queued; a fresh snapshot rediscovers the new project. Caller path hints cannot choose a filesystem authority.
+- Requires the corresponding host correction so workspace discovery, scoped files and registered-folder actions follow the invoking session instead of the foreground project. Updating this plugin alone does not fix an older host's routing.
+- No record migration or additional permission is required. Existing data and source-verification rules remain unchanged.
+
 ## 0.3.5 (workspace discovery repair)
 
 - Fix a 0.3.4 regression where a snapshot with an empty or stale optional `workspacePath` failed with `WORKSPACE_CHANGED`, blocking the discovery step before initialization or saving.

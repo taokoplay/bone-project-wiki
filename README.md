@@ -18,6 +18,7 @@
 - **Agent 协作记忆层**：在轮次结算后保存用户明确表达的具体偏好与事实；需要结合上文的记忆请求由 Agent 提炼后通过工具保存，下一轮以有篇幅限制的摘要与全文路径提供参考。
 - **First-stage performance improvements (included in 0.3.4)**: search verifies linked sources in one request, avoids duplicate body reads and does not generate media or HTML previews. XLSX workbooks reuse a bounded numeric formatter pool while preserving displayed values and read limits. Actual sources remain authoritative and facts are not cached across requests. See the [performance measurements and limits](docs/performance-optimizations.md).
 - **Save and latest-search performance (0.3.4)**: autosave keeps the active editor and applies a full refreshed snapshot without rebuilding the panel. Save and refresh reuse verified work within one operation; final conflict checks and write readback remain fresh. New search input cancels obsolete panel searches while queued writes retain their order. Partial refresh failures retain the saved revision and allow retry. See the [save and search contract](docs/operation-stage-two-contract.md) for compatibility and limits.
+- **Per-project requests (0.3.6)**: different projects have independent queues and operation scopes. Sessions in the same project keep FIFO writes, queued callers retain their own invocation identity, and search cancellation stays within a project. This requires the matching host session-workspace correction; an older host can still return foreground project metadata. Plugin-level personal preferences retain their shared storage and serialized revision checks. No data migration is needed.
 
 ---
 

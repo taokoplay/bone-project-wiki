@@ -77,7 +77,7 @@ test('discovered snapshots still reject a real project change during filesystem 
   assert.equal(snapshot.initialized, false);
 });
 
-test('queued snapshot discovers the project at execution and never reuses the interrupted request scope', async t => {
+test('queued snapshot rejects a changed admitted project and a new discovery recovers', async t => {
   const f = await fixture(t, { documents:1, linked:0 });
   const other = path.join(f.root, 'other-project'); await fs.mkdir(other);
   const entered = deferred(), release = deferred();
@@ -87,7 +87,8 @@ test('queued snapshot discovers the project at execution and never reuses the in
   const queued = f.service.request({ action:'snapshot', workspacePath:f.root });
   f.switchTo(other); f.afterRead = null; release.resolve();
   assert.match((await active).message, /WORKSPACE_CHANGED/);
-  const result = await queued;
+  await assert.rejects(queued, /WORKSPACE_CHANGED/);
+  const result = await f.service.request({ action:'snapshot', workspacePath:f.root });
   assert.equal(result.workspacePath, other);
   assert.equal(result.initialized, false);
 });

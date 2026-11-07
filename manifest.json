@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "bone.project-wiki",
   "name": "BoneProjectWiki",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "description": "A user-owned project knowledge base with document-linked memory, a read-only memory overview and explainable local recall.",
   "author": "taokoplay",
   "homepage": "https://github.com/taokoplay/bone-project-wiki",

@@ -1,5 +1,25 @@
 # 功能验证与测试验收报告（VALIDATION）
 
+## 0.3.6 publication preparation
+
+- The user authorized publication of the project-isolation change. Host source is delivered through a fork PR because the account lacks upstream write access; plugin 0.3.6 is available in the owned marketplace listing with no pending version.
+- The primary checkout had Pi 1.4.0 while the frozen host lockfile requires Pi 1.5.0. A frozen, scripts-disabled dependency refresh in the isolated worktree reused 812 cached packages and fetched 11 missing packages without changing the lockfile. This was required to validate the current host source, not to create a second test-only environment.
+- With matching dependencies, full desktop typecheck and production desktop build pass. Repository lint passes (142 files and style-token check). Host tests use the already installed Electron 43 / Node 24 runtime because command-line Node 22.14 lacks Zstd needed by locked undici; all 63 relevant tests and the actual host/plugin multi-project process flow pass. The complete plugin suite passes 246 tests.
+- The earlier 34-error type comparison and direct Node startup failures below are historical environment evidence, not remaining typecheck failures. The broad build:js command hit its 60-second deadline during docs/render builds; the complete desktop build was run separately and passed, so the timeout is not reported as a successful broad build.
+- Publication preparation changes only release documentation from candidate SHA-256 `64265b5682609b9acd3384735adece2f4fe9ed45fa5c7f82baea7d634d132f04`. Runtime and host declarations retain exact candidate parity. The original candidate, logs and user data are excluded from source commits.
+- Complete manifest fields and committed runtime files are submitted once with a pushed sourceRef. Marketplace publication and official-package verification are tracked separately. Plugin updates do not install a corrected host, and no user instance was modified.
+
+## 0.3.6 project-isolated request candidate
+
+- Confirmed two independent causes: host workspace metadata still followed foreground selection while ordinary filesystem roots followed the invoking session; the plugin used one global queue and operation scope, and queued callbacks inherited the pump's invocation context.
+- Host branch `fix/plugin-session-workspace-context`, base `0d5b1e7daedf84ecd0b00a4ad3a0e42953f51e9e`, aligns discovery and registered-folder actions with trusted session filesystem authority. Plugin branch `fix/wiki-project-isolated-requests`, base `4ee43e368fbe96b0b87aa8fd3299219a4af5b097`, adds per-project queues, async-local operation scopes and per-job AsyncResource capture. Personal preferences retain one global settings queue.
+- Original host discovery tests had four failures out of five; the registered-folder regression also failed before its fix. Original plugin isolation tests had four failures out of six; a preference conflict test first reproduced a new parallel-settings race before the dedicated queue was retained.
+- Relevant host suite: 63 passed. Full plugin suite: 246 passed, no failures/skips/cancellations. Actual PluginRuntime -> plugin child -> temporary filesystem flow passes independent project saves during held I/O, queued caller identity, foreground switching/no visible root, wrong-target refusal and cancellation isolation. The same flow passes against extracted package bytes. Existing browser save/search and real extension loader pass.
+- One bounded review reported no material findings. Host runtime esbuild bundle passes. Full host typecheck does not pass in the reused environment: source-mapped original and candidate each produce the same 34 baseline errors, zero new errors. Biome excludes the changed Electron paths and checked no files; this is not reported as passing lint.
+- Candidate: 63 uncompressed files, 521579 bytes, SHA-256 `64265b5682609b9acd3384735adece2f4fe9ed45fa5c7f82baea7d634d132f04`. Exact source parity, dependency closure, privacy, 75 JavaScript/10 Python syntax, Shell, documentation links and diff whitespace pass. The i18n gate has zero failures and four existing brand-title reviews.
+- Native isolated official 0.3.5 -> candidate 0.3.6 package upgrade passes with all 63 installed hashes, preserved plugin test data and no permission difference. Runtime isolation requires the separate host correction and was verified against its source, not the unmodified running app. No provider, paid API, user instance, verify:ui or new dependency installation was used.
+- Both remote main baselines were refreshed and equal the task bases. Changes remain uncommitted, unpushed and unpublished; no running application/plugin or actual project data was replaced. Full host typecheck in a compatible environment and deployment remain outstanding.
+
 ## 0.3.5 publication preparation
 
 - The user authorized Git submission and marketplace publication of the verified workspace-discovery repair. The account owns `bone.project-wiki`, is bound to `taokoplay/bone-project-wiki`, and version 0.3.5 is available with no pending version.

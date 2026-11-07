@@ -1,6 +1,6 @@
 # Stage-two save and latest-search contract
 
-Version: 0.3.4, based on accepted local candidate 0.3.3. This contract covers save/refresh and obsolete search work. It preserves XLSX parsing, memory ownership, permissions and persistent record format.
+Versions: 0.3.4 through 0.3.6. This contract covers save/refresh, obsolete search work and per-project request isolation. It preserves XLSX parsing, memory ownership, permissions and persistent record format.
 
 ## Capabilities and compatibility
 
@@ -12,9 +12,9 @@ requestCapabilities: {schemaVersion:1, latestSearch:true, saveSnapshot:true}
 
 The public project_wiki schema/actions and existing `wiki` channel remain compatible. Default save still returns a record. No capability means renderer uses the released search/save/snapshot path. The new panel channels are private implementation contracts of the same bundle.
 
-Snapshot is a discovery operation. Any caller-supplied `workspacePath`, including an empty or stale hint, is ignored when establishing its scope, as in releases before 0.3.4. The scope binds to the first actual host workspace at execution and rejects changes during later awaits or I/O. Every non-snapshot action still requires the exact returned workspace path. An ignored hint neither selects a different project nor authorizes reads or writes there.
+Snapshot is a discovery operation. Caller-supplied `workspacePath`, including an empty or stale hint, does not select a project. Before choosing a project queue, the host's actual workspace is resolved in the invoking call context. The request binds to that project at admission and rejects actual project changes while queued or during later I/O. A fresh discovery can recover after a real rebind. Every non-snapshot action still requires the exact returned path.
 
-The 0.3.5 regression path uses the registered public tool with default-filled snapshot arguments, then initializes the returned workspace, saves a document and reads back its verified revision. Tests also cover queued discovery after an interrupted old-project read, empty/stale hints on initialized libraries, unchanged public/private mutation and search guards, and local-project/unload boundaries.
+The registered public-tool regression starts with default-filled snapshot arguments, initializes the discovered workspace, saves a document and reads its verified revision. The project-isolation suite additionally covers held requests in two projects, queued caller identities, unchanged mutation/search guards, independent cancellation, global personal-preference conflicts, idle-state bounds and disposal.
 
 ## Latest panel searches
 
@@ -28,9 +28,9 @@ Return value is the existing search result array. clientId is a renderer-generat
 
 `wiki.search.cancel` calls `service.cancelLatestSearch({clientId,sequence})` outside the request queue. Cancellation means "cancel generations strictly less than sequence"; an out-of-order cancel for generation N must not cancel a new run at N. Lower sequence commands cannot cancel newer runs. Return is `{cancelled:boolean}`; it acknowledges bookkeeping, not completion of an OS read already in progress.
 
-One client owns at most one active search and its latest queued search. Replacing queued work rejects it without filesystem work, removes the old queue slot and appends the latest search after already queued mutations. Running searches stop at the next I/O/check boundary. Normal writes remain FIFO and cannot be cancelled by search input. Direct tool searches are independent and may use their supplied AbortSignal. All request dispatch stays serialized.
+Each project/client owns at most one active search and its latest queued search. Replacing queued work rejects it without filesystem work and appends the latest search after that project's already queued mutations. Running searches stop at the next I/O/check boundary. Writes remain FIFO within a project and cannot be cancelled by search input. Different projects have independent queues and operation scopes. Direct tool searches are independent and may use their supplied AbortSignal.
 
-Obsolete work rejects with an Error carrying `code:'CANCELLED'` and message `CANCELLED`. That error must propagate through unreadable-source/cache fallback catches. Workspace and unload errors retain their existing codes. Panel generations/context guards suppress obsolete errors/results. Input, clearing, project invalidation and pagehide cancel immediately; debounce remains 220 ms. State is bounded to 32 clients, retains counters only (no queries/results), and disposal terminates read work and queued jobs.
+Obsolete work rejects with `code:'CANCELLED'` and message `CANCELLED`. Interruptions propagate through unreadable/cache fallbacks. Input, clearing, project invalidation and pagehide cancel before debounce. Each project retains at most 32 client counters; at most 32 idle project entries are retained. Active queues are not evicted, finished scopes clear their raw reads, and unload closes every queue. No queries, results or bodies persist in idle bookkeeping.
 
 ## Panel save and snapshot
 
@@ -64,3 +64,11 @@ UI ownership: renderer/app.mjs integration; new renderer helpers; renderer/docum
 - A superseded running/queued search cannot cancel or overtake queued writes; real service filesystem reads stop after the explicit gate is released and cancellation checked.
 - Fresh guards detect same-size/same-mtime external changes before save, verified readback errors, new target collisions and workspace changes. Source identity collisions/stale/missing/unreadable states remain conservative.
 - Benchmark save+snapshot on aged 200/800-document fixtures; compare body reads, index writes, UI latency and node identity. Report real results and remaining limitations, not a fixed timing promise.
+
+## Per-project host cooperation (0.3.6)
+
+The host must resolve `workspace.get()` and workspace filesystem roots from the trusted invoking session, including its group metadata, rather than the selected frontend project. A separate host correction provides this consistency. Updating only this plugin cannot repair an older host that still returns foreground metadata. Project IDs/paths supplied by the model are not authority to select an unrelated filesystem root.
+
+Each queued job captures its async resource at enqueue time, preserving the plugin host's invocation ID even when an earlier job's queue pump executes it. The operation scope uses async-local storage, so concurrent projects do not share raw-body/scan caches or expected paths. Multiple sessions in the same project use one FIFO queue; different projects can progress concurrently. Plugin-level personal preferences keep a separate global queue because their storage remains shared. The public schema and channel result shapes remain compatible.
+
+`tests/project-isolation-host.mjs` runs the actual plugin entry point through the real host runtime/child RPC boundary and temporary project files. It holds A's read, saves B before releasing A, runs a queued second caller in A after the first invocation retires, switches/clears the visible project, rejects mismatched save targets, cancels one caller and verifies sibling progress. It uses no live provider or user instance.

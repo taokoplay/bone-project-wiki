@@ -1,13 +1,16 @@
 'use strict';
+const {AsyncResource}=require('node:async_hooks');
 const {operationError}=require('./operation-errors.cjs');
 class RequestQueue {
- constructor(){this.pending=[];this.active=null;this.draining=false;this.closed=false;}
+ constructor(onIdle=()=>{}){this.pending=[];this.active=null;this.draining=false;this.closed=false;this.onIdle=onIdle;}
+ get busy(){return this.active!==null||this.pending.length>0||this.draining;}
  enqueue(work,{cancelable=false,signal,key=null,generation=0}={}) {
   if(this.closed)return Promise.reject(operationError('PLUGIN_UNLOADED'));
   if(cancelable&&signal?.aborted)return Promise.reject(operationError('CANCELLED'));
   let resolve,reject;const result=new Promise((yes,no)=>{resolve=yes;reject=no;});
-  const job={work,key,generation,resolve,reject,settled:false,controller:cancelable?new AbortController():null,cleanup:()=>{}};
-  if(cancelable&&signal){const abort=()=>this.cancelJob(job,'CANCELLED');signal.addEventListener('abort',abort,{once:true});job.cleanup=()=>signal.removeEventListener('abort',abort);}
+  const context=new AsyncResource('WikiRequest',{requireManualDestroy:true});
+  const job={work:signal=>context.runInAsyncScope(work,undefined,signal),key,generation,resolve,reject,settled:false,controller:cancelable?new AbortController():null,cleanup:()=>context.emitDestroy()};
+  if(cancelable&&signal){const abort=()=>this.cancelJob(job,'CANCELLED');signal.addEventListener('abort',abort,{once:true});job.cleanup=()=>{signal.removeEventListener('abort',abort);context.emitDestroy();};}
   this.pending.push(job);
   if(cancelable&&signal?.aborted)this.cancelJob(job,'CANCELLED');
   if(!this.draining){this.draining=true;queueMicrotask(()=>{void this.drain();});}
@@ -31,7 +34,7 @@ class RequestQueue {
     catch(error){this.settle(job,error);}
     finally{job.cleanup();this.active=null;}
    }
-  } finally {this.draining=false;}
+  } finally {this.draining=false;this.onIdle();}
  }
  close(){if(this.closed)return;this.closed=true;for(const job of [...this.pending])this.cancelJob(job,'PLUGIN_UNLOADED');if(this.active)this.cancelJob(this.active,'PLUGIN_UNLOADED');}
 }
